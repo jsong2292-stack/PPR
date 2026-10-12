@@ -1,0 +1,46 @@
+{
+  "name": "ppr-quality-analysis",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PPR 质量智能分析助手 —— 前后端分离的真实服务（Next.js App Router + 自定义 Server + MySQL）",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": ">=20.9.0 <25",
+    "pnpm": ">=9"
+  },
+  "scripts": {
+    "preinstall": "node scripts/check-toolchain.mjs",
+    "postinstall": "node scripts/check-toolchain.mjs --post",
+    "dev": "cross-env NODE_ENV=development tsx watch --clear-screen=false server/index.ts",
+    "build": "next build",
+    "start": "cross-env NODE_ENV=production tsx server/index.ts",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit --pretty false",
+    "db:check": "tsx scripts/db-check.ts",
+    "db:migrate": "tsx scripts/db-migrate.ts",
+    "db:seed": "tsx scripts/db-seed.ts",
+    "db:smoke": "tsx scripts/db-smoke.ts",
+    "db:reset-demo": "tsx scripts/db-seed.ts --reset-demo",
+    "smoke": "tsx scripts/smoke-e2e.ts"
+  },
+  "dependencies": {
+    "bcryptjs": "3.0.3",
+    "echarts": "5.6.0",
+    "jose": "6.1.0",
+    "mysql2": "3.15.3",
+    "next": "16.1.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "xlsx": "0.18.5",
+    "zod": "4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.4",
+    "cross-env": "10.1.0",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  }
+}

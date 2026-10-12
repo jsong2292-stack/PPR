@@ -23,3 +23,5 @@
 ## 初始基线
 
 根目录 `index.html` 是原型入口；`history/index_V1.0.html` 是原始基线备份。后续版本和改动记录以 Git 提交历史为准。回退 HTML 不会自动恢复或清除浏览器保存的工程师记录。
+
+本轮分析框架修改前的工作区基准为 `history/index_before_analysis_framework_2026-10-12.html`，内容来自当时的 `index.html`，包含此前尚未提交的 Excel 导入改动；原始 `history/index_V1.0.html` 未修改。需要恢复本轮修改前界面时，可将该基准文件内容恢复到 `index.html`，并保留浏览器本地工程师记录。

@@ -32,8 +32,8 @@ export const RESOURCE_CONFIG: Record<MasterResource, ResourceConfig> = {
   },
   specs: {
     table: 'ppr_product_spec',
-    columns: ['code', 'name', 'category_id', 'outer_diameter_mm', 'wall_thickness_mm', 'outer_lower_mm', 'outer_upper_mm', 'wall_lower_mm', 'wall_upper_mm', 'ovality_upper_mm', 'status'],
-    required: ['code', 'name', 'category_id', 'outer_diameter_mm', 'wall_thickness_mm'],
+    columns: ['code', 'name', 'category_id', 'outer_upper_mm', 'outer_lower_mm', 'wall_upper_mm', 'wall_lower_mm', 'ovality_upper_mm', 'status'],
+    required: ['code', 'name', 'category_id', 'outer_upper_mm', 'outer_lower_mm', 'wall_upper_mm', 'wall_lower_mm', 'ovality_upper_mm'],
     orderBy: 's.id DESC',
     listSql: `SELECT s.*, c.name AS category_name FROM ppr_product_spec s
       JOIN ppr_product_category c ON c.id=s.category_id ORDER BY s.id DESC`,
@@ -65,10 +65,10 @@ export const RESOURCE_CONFIG: Record<MasterResource, ResourceConfig> = {
   },
   metrics: {
     table: 'ppr_metric',
-    columns: ['code', 'name', 'unit', 'lower_limit', 'upper_limit', 'influences', 'description', 'status'],
+    columns: ['code', 'name', 'unit', 'influences', 'description', 'status'],
     required: ['code', 'name', 'unit'],
     orderBy: 'id DESC',
-    listSql: 'SELECT * FROM ppr_metric ORDER BY id DESC',
+    listSql: 'SELECT id, code, name, unit, influences, description, status FROM ppr_metric ORDER BY id DESC',
   },
   measurements: {
     table: 'ppr_product_measurement',

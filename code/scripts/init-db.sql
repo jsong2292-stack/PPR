@@ -229,18 +229,18 @@ CREATE TABLE IF NOT EXISTS ppr_product_category (
   UNIQUE KEY uk_ppr_product_category_code (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PPR产品类别主数据';
 
--- 产品规格：定义公称尺寸及演示判定限值。
+-- 产品规格：定义最大/最小外径、最大/最小壁厚及不圆度上限，作为监控判定限值。
 CREATE TABLE IF NOT EXISTS ppr_product_spec (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键，自增编号',
   code VARCHAR(64) NOT NULL COMMENT '产品规格编码，全局唯一',
   name VARCHAR(120) NOT NULL COMMENT '产品规格名称',
   category_id BIGINT UNSIGNED NOT NULL COMMENT '所属产品类别ID',
-  outer_diameter_mm DECIMAL(10,3) NOT NULL COMMENT '公称外径，单位mm',
-  wall_thickness_mm DECIMAL(10,3) NOT NULL COMMENT '公称壁厚，单位mm',
-  outer_lower_mm DECIMAL(10,3) NOT NULL COMMENT '外径演示下限，单位mm',
-  outer_upper_mm DECIMAL(10,3) NOT NULL COMMENT '外径演示上限，单位mm',
-  wall_lower_mm DECIMAL(10,3) NOT NULL COMMENT '标准壁厚演示下限，单位mm',
-  wall_upper_mm DECIMAL(10,3) NOT NULL COMMENT '标准壁厚演示上限，单位mm',
+  outer_diameter_mm DECIMAL(10,3) NULL COMMENT '公称外径（历史字段，界面已改用最大/最小外径），单位mm',
+  wall_thickness_mm DECIMAL(10,3) NULL COMMENT '公称壁厚（历史字段，界面已改用最大/最小壁厚），单位mm',
+  outer_lower_mm DECIMAL(10,3) NOT NULL COMMENT '外径下限，界面显示为「最小外径」，单位mm',
+  outer_upper_mm DECIMAL(10,3) NOT NULL COMMENT '外径上限，界面显示为「最大外径」，单位mm',
+  wall_lower_mm DECIMAL(10,3) NOT NULL COMMENT '壁厚下限，界面显示为「最小壁厚」，单位mm',
+  wall_upper_mm DECIMAL(10,3) NOT NULL COMMENT '壁厚上限，界面显示为「最大壁厚」，单位mm',
   ovality_upper_mm DECIMAL(10,3) NOT NULL COMMENT '不圆度演示上限，单位mm',
   status ENUM('enabled','disabled') NOT NULL DEFAULT 'enabled' COMMENT '状态：enabled启用、disabled停用',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -303,14 +303,14 @@ CREATE TABLE IF NOT EXISTS ppr_batch (
   CONSTRAINT fk_ppr_batch_haul_off FOREIGN KEY (haul_off_id) REFERENCES ppr_equipment(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PPR生产批次基础信息';
 
--- 质量指标及影响因素：用于数据管理页展示指标、限值和建议排查方向。
+-- 质量指标及影响因素：纯指标字典（编码/名称/单位/影响因素/说明）；判定限值统一取产品规格表 ppr_product_spec。
 CREATE TABLE IF NOT EXISTS ppr_metric (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键，自增编号',
   code VARCHAR(64) NOT NULL COMMENT '指标编码，全局唯一',
   name VARCHAR(100) NOT NULL COMMENT '指标名称',
   unit VARCHAR(20) NOT NULL COMMENT '计量单位',
-  lower_limit DECIMAL(12,4) NULL COMMENT '通用演示下限，按规格表限值优先',
-  upper_limit DECIMAL(12,4) NULL COMMENT '通用演示上限，按规格表限值优先',
+  lower_limit DECIMAL(12,4) NULL COMMENT '已弃用：判定限值统一取产品规格表 ppr_product_spec，本列仅留有历史数据',
+  upper_limit DECIMAL(12,4) NULL COMMENT '已弃用：判定限值统一取产品规格表 ppr_product_spec，本列仅留有历史数据',
   influences VARCHAR(1000) NULL COMMENT '可能影响因素，仅作为排查方向',
   description VARCHAR(1000) NULL COMMENT '指标口径与说明',
   status ENUM('enabled','disabled') NOT NULL DEFAULT 'enabled' COMMENT '状态：enabled启用、disabled停用',
@@ -519,11 +519,11 @@ INSERT INTO ppr_batch (id, batch_no, spec_id, extruder_id, haul_off_id, producti
   (4, '12121D0035', 2, 1, 2, '乙班', '2026-10-12 18:00:00', '2026-10-13 02:00:00', 'completed', 'MES')
 ON DUPLICATE KEY UPDATE spec_id=VALUES(spec_id), production_group=VALUES(production_group), start_time=VALUES(start_time), status=VALUES(status);
 
-INSERT INTO ppr_metric (id, code, name, unit, lower_limit, upper_limit, influences, description, status) VALUES
-  (1, 'outer_diameter', '外径', 'mm', 25.0000, 25.5000, '定径套、真空度、冷却水温、牵引速度', '测量管材外径；正式判定以适用标准和产品规格为准', 'enabled'),
-  (2, 'min_wall_thickness', '壁厚', 'mm', 4.2000, 4.8000, '挤出量、牵引速度、模具偏心、原料波动', '仅最薄点不能代表整体壁厚分布', 'enabled'),
-  (3, 'ovality', '不圆度', 'mm', 0.0000, 0.3500, '定径冷却、支撑、牵引、测量截面', '同一样管同一截面最大外径减最小外径', 'enabled')
-ON DUPLICATE KEY UPDATE name=VALUES(name), unit=VALUES(unit), lower_limit=VALUES(lower_limit), upper_limit=VALUES(upper_limit), influences=VALUES(influences), status=VALUES(status);
+INSERT INTO ppr_metric (id, code, name, unit, influences, description, status) VALUES
+  (1, 'outer_diameter', '外径', 'mm', '定径套、真空度、冷却水温、牵引速度', '测量管材外径；判定限值取产品规格，正式判定以适用标准为准', 'enabled'),
+  (2, 'min_wall_thickness', '壁厚', 'mm', '挤出量、牵引速度、模具偏心、原料波动', '仅最薄点不能代表整体壁厚分布', 'enabled'),
+  (3, 'ovality', '不圆度', 'mm', '定径冷却、支撑、牵引、测量截面', '同一样管同一截面最大外径减最小外径', 'enabled')
+ON DUPLICATE KEY UPDATE name=VALUES(name), unit=VALUES(unit), influences=VALUES(influences), status=VALUES(status);
 
 INSERT INTO ppr_product_measurement (id, record_no, sample_no, batch_id, inspect_time, outer_diameter_mm, min_wall_thickness_mm, max_wall_thickness_mm, max_outer_diameter_mm, min_outer_diameter_mm, ovality_mm, data_source, quality_flag, remark) VALUES
   (1, 'IR-20261010-001', 'S-001', 1, '2026-10-10 08:20:00', 25.230, 4.320, 4.430, 25.310, 25.120, 0.190, 'QMS', 'normal', '基线点'),

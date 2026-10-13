@@ -22,11 +22,12 @@ export const ADMIN_MENU_GROUPS: AdminMenuGroup[] = [
   {
     key: 'system',
     label: '系统管理',
-    description: '维护产品类别、产品规格、设备类型与设备台账等基础主数据。',
+    description: '维护产品类别、产品规格、质量指标、设备类型与设备台账等基础主数据。',
     icon: Settings2,
     items: [
       { label: '产品类别', href: '/quality/data/categories', icon: Boxes },
       { label: '产品规格', href: '/quality/data/specs', icon: PackageSearch },
+      { label: '质量指标与影响因素', href: '/quality/data/metrics', icon: Gauge },
       { label: '设备类型', href: '/quality/data/equipment-types', icon: Wrench },
       { label: '设备台账', href: '/quality/data/equipment', icon: Factory },
     ],
@@ -34,11 +35,10 @@ export const ADMIN_MENU_GROUPS: AdminMenuGroup[] = [
   {
     key: 'datasource',
     label: '数据源管理',
-    description: '维护批次基础信息、质量指标以及产品数据与设备采集数据。',
+    description: '维护批次基础信息以及产品数据与设备采集数据。',
     icon: Database,
     items: [
       { label: '批次基础信息', href: '/quality/data/batches', icon: ListChecks },
-      { label: '质量指标与影响因素', href: '/quality/data/metrics', icon: Gauge },
       { label: '产品数据', href: '/quality/data/measurements', icon: ClipboardCheck },
       { label: '设备采集数据', href: '/quality/data/readings', icon: Activity },
     ],

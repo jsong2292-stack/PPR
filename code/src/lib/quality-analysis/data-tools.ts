@@ -102,11 +102,30 @@ export function createQualityAgentTools(context: AlertAgentContext, traces: Tool
 
   const getMetricDefinition = tool(
     async () => trace(traces, 'get_metric_definition', {}, async () => {
-      return dbClient.queryOne<Row>('SELECT * FROM ppr_metric WHERE code=?', [context.metric_code]);
+      const dictionary = await dbClient.queryOne<Row>(
+        'SELECT code, name, unit, influences, description FROM ppr_metric WHERE code=?',
+        [context.metric_code]
+      );
+      // 判定限值一律取当前批次的产品规格，不再使用 ppr_metric 的通用限值。
+      const specLimits: Record<string, { lower: unknown; upper: unknown }> = {
+        outer_diameter: { lower: context.outer_lower_mm, upper: context.outer_upper_mm },
+        min_wall_thickness: { lower: context.wall_lower_mm, upper: context.wall_upper_mm },
+        ovality: { lower: 0, upper: context.ovality_upper_mm },
+      };
+      const limit = specLimits[String(context.metric_code)] ?? { lower: null, upper: null };
+      return {
+        ...(dictionary ?? {}),
+        metric_code: context.metric_code,
+        spec_id: context.spec_id,
+        spec_name: context.spec_name,
+        lower_limit: limit.lower,
+        upper_limit: limit.upper,
+        limit_source: '产品规格（ppr_product_spec）标准限值',
+      };
     }),
     {
       name: 'get_metric_definition',
-      description: '获取异常指标的定义、单位、通用演示限值和影响因素。',
+      description: '获取异常指标的口径、单位、影响因素，以及当前产品规格适用的判定限值。',
       schema: z.object({}),
     }
   );

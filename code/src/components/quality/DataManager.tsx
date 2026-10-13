@@ -21,7 +21,7 @@ function displayCell(key: string, value: unknown) {
   return String(value);
 }
 
-export function DataManager({ resource, title, description, fields, columns }: { resource: string; title: string; description: string; fields: Field[]; columns: Column[] }) {
+export function DataManager({ resource, title, description, fields, columns, excel = true }: { resource: string; title: string; description: string; fields: Field[]; columns: Column[]; excel?: boolean }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -87,8 +87,10 @@ export function DataManager({ resource, title, description, fields, columns }: {
 
   return <>
     <PageHeader title={title} description={description} actions={<>
-      <Button variant="outline" onClick={downloadTemplate}><Download size={16} />下载模板</Button>
-      <Button variant="outline" asChild><label className="cursor-pointer"><Upload size={16} />Excel 导入<input className="hidden" type="file" accept=".xlsx,.xls,.csv" onChange={(event) => { importFile(event.target.files?.[0]); event.target.value=''; }} /></label></Button>
+      {excel && <>
+        <Button variant="outline" onClick={downloadTemplate}><Download size={16} />下载模板</Button>
+        <Button variant="outline" asChild><label className="cursor-pointer"><Upload size={16} />Excel 导入<input className="hidden" type="file" accept=".xlsx,.xls,.csv" onChange={(event) => { importFile(event.target.files?.[0]); event.target.value=''; }} /></label></Button>
+      </>}
       <Button onClick={() => showEditor()} className="bg-blue-700 hover:bg-blue-800"><Plus size={16} />新增</Button>
     </>} />
     <Card className="border-slate-200 shadow-sm"><CardContent className="p-0">

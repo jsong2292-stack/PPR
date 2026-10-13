@@ -7,24 +7,29 @@ const statusOptions = [{ label: '启用', value: 'enabled' }, { label: '停用',
 const batchStatus = [{ label: '生产中', value: 'running' }, { label: '已完成', value: 'completed' }, { label: '暂停', value: 'paused' }];
 const qualityFlags = [{ label: '正常', value: 'normal' }, { label: '中风险', value: 'medium' }, { label: '高风险', value: 'high' }, { label: '数据错误', value: 'error' }];
 
-const configs: Record<string, { title: string; description: string; fields: Field[]; columns: Column[] }> = {
+// 系统管理下的基础主数据只允许页面 CRUD，不提供 Excel 模板与导入（excel: false）。
+const configs: Record<string, { title: string; description: string; fields: Field[]; columns: Column[]; excel?: boolean }> = {
   categories: {
     title: '产品类别', description: '维护产品分类，为规格和质量数据提供统一主数据编码。',
+    excel: false,
     fields: [{ key:'code',label:'类别编码',required:true },{ key:'name',label:'类别名称',required:true },{ key:'description',label:'说明',type:'textarea' },{ key:'status',label:'状态',type:'select',options:statusOptions }],
     columns: [{key:'code',label:'编码'},{key:'name',label:'名称'},{key:'description',label:'说明'},{key:'status',label:'状态'}],
   },
   specs: {
-    title: '产品规格', description: '维护规格尺寸及监控使用的演示限值，正式判定仍以适用标准为准。',
-    fields: [{key:'code',label:'规格编码',required:true},{key:'name',label:'规格名称',required:true},{key:'category_id',label:'产品类别',type:'select',optionResource:'categories',required:true},{key:'outer_diameter_mm',label:'公称外径 mm',type:'number',required:true},{key:'wall_thickness_mm',label:'公称壁厚 mm',type:'number',required:true},{key:'outer_lower_mm',label:'外径下限 mm',type:'number',required:true},{key:'outer_upper_mm',label:'外径上限 mm',type:'number',required:true},{key:'wall_lower_mm',label:'标准壁厚下限 mm',type:'number',required:true},{key:'wall_upper_mm',label:'标准壁厚上限 mm',type:'number',required:true},{key:'ovality_upper_mm',label:'不圆度上限 mm',type:'number',required:true},{key:'status',label:'状态',type:'select',options:statusOptions}],
-    columns: [{key:'code',label:'编码'},{key:'name',label:'名称'},{key:'category_name',label:'产品类别'},{key:'outer_diameter_mm',label:'外径 mm'},{key:'wall_thickness_mm',label:'壁厚 mm'},{key:'ovality_upper_mm',label:'不圆度上限 mm'},{key:'status',label:'状态'}],
+    title: '产品规格', description: '维护规格的最大/最小外径、最大/最小壁厚和不圆度上限，作为监控判定限值；正式判定仍以适用标准为准。',
+    excel: false,
+    fields: [{key:'code',label:'规格编码',required:true},{key:'name',label:'规格名称',required:true},{key:'category_id',label:'产品类别',type:'select',optionResource:'categories',required:true},{key:'outer_upper_mm',label:'最大外径 mm',type:'number',required:true},{key:'outer_lower_mm',label:'最小外径 mm',type:'number',required:true},{key:'wall_upper_mm',label:'最大壁厚 mm',type:'number',required:true},{key:'wall_lower_mm',label:'最小壁厚 mm',type:'number',required:true},{key:'ovality_upper_mm',label:'不圆度上限 mm',type:'number',required:true},{key:'status',label:'状态',type:'select',options:statusOptions}],
+    columns: [{key:'code',label:'编码'},{key:'name',label:'名称'},{key:'category_name',label:'产品类别'},{key:'outer_upper_mm',label:'最大外径 mm'},{key:'outer_lower_mm',label:'最小外径 mm'},{key:'wall_upper_mm',label:'最大壁厚 mm'},{key:'wall_lower_mm',label:'最小壁厚 mm'},{key:'ovality_upper_mm',label:'不圆度上限 mm'},{key:'status',label:'状态'}],
   },
   'equipment-types': {
     title: '设备类型', description: '维护挤出机、牵引机、在线测径仪等设备分类。',
+    excel: false,
     fields: [{key:'code',label:'类型编码',required:true},{key:'name',label:'类型名称',required:true},{key:'description',label:'说明',type:'textarea'},{key:'status',label:'状态',type:'select',options:statusOptions}],
     columns: [{key:'code',label:'编码'},{key:'name',label:'名称'},{key:'description',label:'说明'},{key:'status',label:'状态'}],
   },
   equipment: {
     title: '设备台账', description: '维护生产设备、类型和所属产线，供批次及采集数据关联。',
+    excel: false,
     fields: [{key:'code',label:'设备编码',required:true},{key:'name',label:'设备名称',required:true},{key:'type_id',label:'设备类型',type:'select',optionResource:'equipment-types',required:true},{key:'line_name',label:'产线/工段',required:true},{key:'status',label:'状态',type:'select',options:[...statusOptions,{label:'检修',value:'maintenance'}]},{key:'description',label:'说明',type:'textarea'}],
     columns: [{key:'code',label:'设备编码'},{key:'name',label:'设备名称'},{key:'type_name',label:'设备类型'},{key:'line_name',label:'产线/工段'},{key:'status',label:'状态'}],
   },
@@ -34,9 +39,10 @@ const configs: Record<string, { title: string; description: string; fields: Fiel
     columns: [{key:'batch_no',label:'批次号'},{key:'spec_name',label:'产品规格'},{key:'production_group',label:'组别'},{key:'start_time',label:'开始时间'},{key:'extruder_name',label:'挤出机'},{key:'haul_off_name',label:'牵引机'},{key:'status',label:'状态'}],
   },
   metrics: {
-    title: '质量指标与影响因素', description: '维护指标口径、通用限值和排查方向，生成分析时仅作为可解释提示。',
-    fields: [{key:'code',label:'指标编码',required:true},{key:'name',label:'指标名称',required:true},{key:'unit',label:'单位',required:true},{key:'lower_limit',label:'通用下限',type:'number'},{key:'upper_limit',label:'通用上限',type:'number'},{key:'influences',label:'影响因素',type:'textarea'},{key:'description',label:'指标说明',type:'textarea'},{key:'status',label:'状态',type:'select',options:statusOptions}],
-    columns: [{key:'code',label:'指标编码'},{key:'name',label:'名称'},{key:'unit',label:'单位'},{key:'lower_limit',label:'下限'},{key:'upper_limit',label:'上限'},{key:'influences',label:'影响因素'},{key:'status',label:'状态'}],
+    title: '质量指标与影响因素', description: '维护指标口径、影响因素和排查方向；判定限值统一取产品规格，本页不再维护限值。',
+    excel: false,
+    fields: [{key:'code',label:'指标编码',required:true},{key:'name',label:'指标名称',required:true},{key:'unit',label:'单位',required:true},{key:'influences',label:'影响因素',type:'textarea'},{key:'description',label:'指标说明',type:'textarea'},{key:'status',label:'状态',type:'select',options:statusOptions}],
+    columns: [{key:'code',label:'指标编码'},{key:'name',label:'名称'},{key:'unit',label:'单位'},{key:'influences',label:'影响因素'},{key:'status',label:'状态'}],
   },
   measurements: {
     title: '产品数据', description: '维护QMS/检验产品记录；新增后可在监控页重新扫描生成预警。',

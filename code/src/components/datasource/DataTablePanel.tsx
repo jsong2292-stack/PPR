@@ -414,7 +414,7 @@ export function DataTablePanel({
                   {column.label}
                 </th>
               ))}
-              {detail ? <th style={{ width: 72 }}>明细</th> : null}
+              {detail ? <th style={{ width: 32 }} aria-label="展开明细" /> : null}
             </tr>
           </thead>
           <tbody>
@@ -437,144 +437,153 @@ export function DataTablePanel({
                         </td>
                       ))}
                       {detail ? (
-                        <td>
-                          <button className="u-btn u-btn--small" type="button">
-                            {expanded ? '收起' : '查看'}
-                          </button>
+                        <td className="u-table__toggle" aria-expanded={expanded}>
+                          <span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
                         </td>
                       ) : null}
                     </tr>
                     {expanded ? (
-                      <tr>
-                        <td colSpan={columnCount + 1} style={{ background: 'var(--c-surface-alt)' }}>
-                          <div className="u-small">
-                            <div className="u-row u-row--between u-mb">
-                              <strong>{detail?.title}</strong>
-                              <span className="u-xs u-faint">编号 {String(id)}</span>
-                            </div>
-                            {detailLoading ? (
-                              <div className="u-empty">加载中…</div>
-                            ) : detailError ? (
-                              <div className="u-notice u-notice--danger">{detailError}</div>
-                            ) : detailRow ? (
-                              <>
-                                <dl className="u-small">
-                                  {detail?.fields.map((field) => {
-                                    const value = pick(detailRow, field.key);
-                                    const column: DataTableColumn = {
-                                      key: field.key,
-                                      label: field.label,
-                                      kind: field.kind,
-                                      digits: field.digits,
-                                      map: field.map,
-                                      tone: field.tone,
-                                      fallback: field.fallback,
-                                    };
-                                    return (
-                                      <div
-                                        key={field.key}
-                                        className="u-row u-row--between"
-                                        style={{ alignItems: 'baseline' }}
-                                      >
-                                        <span className="u-faint u-xs">{field.label}</span>
-                                        <span>{renderCell(value, column)}</span>
+                      <tr className="u-table__detail-row">
+                        <td colSpan={columnCount + 1} className="u-table__detail-cell">
+                          <div className="u-detail">
+                            <div className="u-detail__body">
+                              {detailLoading ? (
+                                <div className="u-detail__placeholder">
+                                  <span className="u-detail__spinner" aria-hidden="true" />
+                                  正在加载明细…
+                                </div>
+                              ) : detailError ? (
+                                <div className="u-notice u-notice--danger">{detailError}</div>
+                              ) : detailRow ? (
+                                <>
+                                  {detail?.fields.length ? (
+                                    <dl className="u-detail__fields">
+                                      {detail.fields.map((field) => {
+                                        const value = pick(detailRow, field.key);
+                                        const column: DataTableColumn = {
+                                          key: field.key,
+                                          label: field.label,
+                                          kind: field.kind,
+                                          digits: field.digits,
+                                          map: field.map,
+                                          tone: field.tone,
+                                          fallback: field.fallback,
+                                        };
+                                        const missing = isMissing(value);
+                                        return (
+                                          <div
+                                            key={field.key}
+                                            className={`u-detail__card${
+                                              missing ? ' u-detail__card--missing' : ''
+                                            }`}
+                                          >
+                                            <dt className="u-detail__label">{field.label}</dt>
+                                            <dd className="u-detail__value">
+                                              {renderCell(value, column)}
+                                            </dd>
+                                          </div>
+                                        );
+                                      })}
+                                    </dl>
+                                  ) : null}
+
+                                  {detail?.metrics ? (
+                                    <section className="u-detail__section">
+                                      <div className="u-detail__section-head">
+                                        <strong>指标值明细</strong>
+                                        <span className="u-xs u-faint">
+                                          {detailMetrics.length
+                                            ? `共 ${detailMetrics.length} 项`
+                                            : '无数据'}
+                                        </span>
                                       </div>
-                                    );
-                                  })}
-                                </dl>
-                                {detail?.metrics ? (
-                                  <>
-                                    <div className="u-divider" />
-                                    <div className="u-strong u-small u-mb">指标值明细</div>
-                                    <div className="u-table-wrap">
-                                      <table className="u-table">
-                                        <thead>
-                                          <tr>
-                                            <th>指标</th>
-                                            <th>取值</th>
-                                            <th>状态</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {detailMetrics.length ? (
-                                            detailMetrics.map((metric) => (
-                                              <tr key={metric.code}>
-                                                <td>{metric.label}</td>
-                                                <td className="u-num">
-                                                  {metric.value === null
-                                                    ? NO_DATA
-                                                    : `${fmt(metric.value, detail.metrics?.digits ?? 3)}${
-                                                        detail.metrics?.unit
-                                                          ? ` ${detail.metrics.unit}`
-                                                          : ''
-                                                      }`}
-                                                </td>
-                                                <td>
-                                                  {metric.value === null ? (
-                                                    <span className="u-tag">无数据</span>
-                                                  ) : (
-                                                    <span className="u-tag u-tag--normal">已记录</span>
-                                                  )}
+                                      {detailMetrics.length ? (
+                                        <ul className="u-detail__metrics">
+                                          {detailMetrics.map((metric) => (
+                                            <li className="u-detail__metric" key={metric.code}>
+                                              <span className="u-detail__metric-label">
+                                                {metric.label}
+                                              </span>
+                                              <span className="u-detail__metric-value u-num">
+                                                {metric.value === null
+                                                  ? NO_DATA
+                                                  : `${fmt(
+                                                      metric.value,
+                                                      detail.metrics?.digits ?? 3,
+                                                    )}${
+                                                      detail.metrics?.unit
+                                                        ? ` ${detail.metrics.unit}`
+                                                        : ''
+                                                    }`}
+                                              </span>
+                                              <span
+                                                className={`u-tag${
+                                                  metric.value === null
+                                                    ? ''
+                                                    : ' u-tag--normal'
+                                                }`}
+                                              >
+                                                {metric.value === null ? '无数据' : '已记录'}
+                                              </span>
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      ) : (
+                                        <div className="u-detail__placeholder">
+                                          该记录没有指标值行，全部按「无数据」处理。
+                                        </div>
+                                      )}
+                                    </section>
+                                  ) : null}
+
+                                  {detail?.list ? (
+                                    <section className="u-detail__section">
+                                      <div className="u-detail__section-head">
+                                        <strong>{detail.list.title}</strong>
+                                        <span className="u-xs u-faint">
+                                          {detailRows.length ? `共 ${detailRows.length} 条` : '无数据'}
+                                        </span>
+                                      </div>
+                                      <div className="u-detail__table-wrap">
+                                        <table className="u-table u-table--nested">
+                                          <thead>
+                                            <tr>
+                                              {detail.list.columns.map((column) => (
+                                                <th key={column.key}>{column.label}</th>
+                                              ))}
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {detailRows.length ? (
+                                              detailRows.map((item, itemIndex) => (
+                                                <tr key={String(item.id ?? itemIndex)}>
+                                                  {detail.list?.columns.map((column) => (
+                                                    <td key={column.key}>
+                                                      {renderCell(pick(item, column.key), column)}
+                                                    </td>
+                                                  ))}
+                                                </tr>
+                                              ))
+                                            ) : (
+                                              <tr>
+                                                <td colSpan={detail.list.columns.length}>
+                                                  <div className="u-detail__placeholder">
+                                                    {detail.list.emptyText ??
+                                                      '该记录没有子表明细，按「无数据」处理。'}
+                                                  </div>
                                                 </td>
                                               </tr>
-                                            ))
-                                          ) : (
-                                            <tr>
-                                              <td colSpan={3}>
-                                                <div className="u-empty">
-                                                  该记录没有指标值行，全部按「无数据」处理。
-                                                </div>
-                                              </td>
-                                            </tr>
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  </>
-                                ) : null}
-                                {detail?.list ? (
-                                  <>
-                                    <div className="u-divider" />
-                                    <div className="u-strong u-small u-mb">{detail.list.title}</div>
-                                    <div className="u-table-wrap">
-                                      <table className="u-table">
-                                        <thead>
-                                          <tr>
-                                            {detail.list.columns.map((column) => (
-                                              <th key={column.key}>{column.label}</th>
-                                            ))}
-                                          </tr>
-                                        </thead>
-                                        <tbody>
-                                          {detailRows.length ? (
-                                            detailRows.map((item, itemIndex) => (
-                                              <tr key={String(item.id ?? itemIndex)}>
-                                                {detail.list?.columns.map((column) => (
-                                                  <td key={column.key}>
-                                                    {renderCell(pick(item, column.key), column)}
-                                                  </td>
-                                                ))}
-                                              </tr>
-                                            ))
-                                          ) : (
-                                            <tr>
-                                              <td colSpan={detail.list.columns.length}>
-                                                <div className="u-empty">
-                                                  {detail.list.emptyText ??
-                                                    '该记录没有子表明细，按「无数据」处理。'}
-                                                </div>
-                                              </td>
-                                            </tr>
-                                          )}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  </>
-                                ) : null}
-                              </>
-                            ) : (
-                              <div className="u-empty">未找到该记录。</div>
-                            )}
+                                            )}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </section>
+                                  ) : null}
+                                </>
+                              ) : (
+                                <div className="u-detail__placeholder">未找到该记录。</div>
+                              )}
+                            </div>
                           </div>
                         </td>
                       </tr>

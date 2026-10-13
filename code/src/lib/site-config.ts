@@ -10,7 +10,7 @@ export const siteConfig={
   copyright:process.env.NEXT_PUBLIC_SITE_COPYRIGHT||'© PPR质量智能分析助手', owner:process.env.NEXT_PUBLIC_SITE_OWNER||'',
   nav:[
     {label:'质量工作台',href:'/quality/monitor'},
-    {label:'异常诊断',href:'/quality/diagnosis'},
+    // 「异常诊断」不挂在顶部导航：诊断页由预警队列的「进入诊断」进入。
     {label:'8D报告',href:'/quality/report'},
     {label:'历史分析',href:'/quality/history'},
   ] as NavItem[],

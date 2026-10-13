@@ -41,7 +41,12 @@ INSERT INTO system_config (`key`, value, description) VALUES
   ('quality_agent_model', 'gpt-6-luna', 'LangChain Agent使用的模型名称'),
   ('quality_agent_fallback_to_rule', 'true', 'Agent失败或未配置密钥时是否自动降级规则引擎'),
   ('quality_agent_max_tool_rounds', '8', 'Agent单次分析最大工具调用轮数'),
-  ('quality_agent_reasoning_effort', 'low', 'Agent推理强度：none/minimal/low/medium/high')
+  ('quality_agent_reasoning_effort', 'low', 'Agent推理强度：none/minimal/low/medium/high'),
+  ('wecom_alert_enabled', 'false', '中/高风险预警是否推送到企业微信消息推送（原群机器人）（true/false）'),
+  ('wecom_alert_webhook', '', '企业微信「消息推送」（原群机器人）Webhook地址，入口在群聊右上角···，不在管理后台'),
+  ('wecom_alert_min_level', 'medium', '触发推送的最低风险级别：medium=中风险及以上、high=仅高风险'),
+  ('wecom_alert_mention_list', '', '推送消息需要@的成员userid，多个用逗号分隔，留空表示不@人'),
+  ('wecom_alert_mention_all', 'false', '推送中/高风险预警时是否@所有人（true/false）')
 ON DUPLICATE KEY UPDATE `key` = `key`;
 
 -- ==========================================
@@ -379,6 +384,8 @@ CREATE TABLE IF NOT EXISTS ppr_alert_event (
   threshold_text VARCHAR(200) NULL COMMENT '触发阈值文本快照',
   status ENUM('open','analyzing','closed') NOT NULL DEFAULT 'open' COMMENT '事件状态：待分析、分析中、已关闭',
   source ENUM('engine','legacy') NOT NULL DEFAULT 'engine' COMMENT '事件来源：engine=判定引擎生成，legacy=历史演示或人工遗留',
+  notified_level ENUM('medium','high') NULL COMMENT '已推送到企业微信的最高风险级别，NULL=未推送；用于重算时避免重复告警',
+  notified_at DATETIME NULL COMMENT '最近一次企业微信推送时间',
   detected_at DATETIME NOT NULL COMMENT '预警识别时间',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',

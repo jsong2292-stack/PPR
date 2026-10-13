@@ -17,6 +17,7 @@
  * 所以重复导入、重复扫描得到的结果完全一致，不会累积历史噪声。
  */
 import { dbClient } from '@/lib/quality';
+import { queueAlertPush, type AlertPushItem } from '@/lib/quality-analysis/wecom-notifier';
 import type { TransactionClient } from '@/storage/database/mysql-client';
 
 type Row = Record<string, unknown>;
@@ -62,6 +63,9 @@ const METRICS: MetricDefinition[] = [
 /** 引擎负责判定的指标编码：只接管这些指标上的事件，其它指标的事件不动。 */
 const ENGINE_METRIC_CODES = METRICS.map((metric) => metric.code);
 
+/** 指标显示名，用于企微推送消息。 */
+const METRIC_LABELS: Record<string, string> = Object.fromEntries(METRICS.map((metric) => [metric.code, metric.label]));
+
 export interface AlertEvaluationSummary {
   /** 参与判定的批次数。 */
   batches: number;
@@ -78,6 +82,9 @@ interface MeasurementRow extends Row {
   id: number;
   record_no: string;
   batch_id: number;
+  /** 批次号与规格名，仅用于企微推送消息的可读上下文。 */
+  batch_no?: string;
+  spec_name?: string;
   inspect_time: Date | string;
   quality_flag: string;
 }
@@ -101,6 +108,8 @@ interface ExistingAlert {
   metric_code: string;
   status: string;
   archived: number;
+  /** 已推送到企业微信的最高风险级别，NULL 表示从未推送。 */
+  notified_level: string | null;
 }
 
 interface ResolvedRange {
@@ -158,6 +167,37 @@ function formatDay(value: Date | string): string {
  */
 function buildEventNo(row: MeasurementRow, metric: MetricDefinition): string {
   return `QE-${formatDay(row.inspect_time)}-${String(row.id).padStart(3, '0')}${metric.suffix}`;
+}
+
+/** 检验时间按 UTC 墙上时间格式化为 yyyy-MM-dd HH:mm，用于企微推送消息。 */
+function formatDateTime(value: Date | string): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
+}
+
+/** 把已推送级别换算成可比较的权重；NULL 或未知值按「从未推送」处理。 */
+function notifiedWeight(value: string | null): number {
+  if (value === 'high' || value === 'medium') return LEVEL_WEIGHT[value];
+  return -1;
+}
+
+/** 组装一条待推送事件。只有新产生或风险升级的中高风险事件会走到这里。 */
+function buildPushItem(id: number, alert: PlannedAlert, row: MeasurementRow | undefined): AlertPushItem {
+  return {
+    id,
+    eventNo: alert.eventNo,
+    riskLevel: alert.riskLevel === 'high' ? 'high' : 'medium',
+    metricLabel: METRIC_LABELS[alert.metricCode] ?? alert.metricCode,
+    ruleName: alert.ruleName,
+    observedValue: alert.observedValue,
+    thresholdText: alert.thresholdText,
+    recordNo: row?.record_no ?? '',
+    batchNo: row?.batch_no ?? '',
+    specName: row?.spec_name ?? '',
+    inspectTime: row ? formatDateTime(row.inspect_time) : '',
+  };
 }
 
 /** 判定单个批次，返回该批次应重建的全部事件。 */
@@ -265,6 +305,7 @@ export async function evaluateAlerts(options: { batchIds?: number[] } = {}): Pro
   const where = batchIds && batchIds.length ? `WHERE m.batch_id IN (${batchIds.map(() => '?').join(',')})` : '';
   const rows = await dbClient.queryAll<MeasurementRow>(`SELECT m.id, m.record_no, m.batch_id, m.inspect_time, m.quality_flag,
     m.outer_diameter_mm, m.min_wall_thickness_mm, m.ovality_mm,
+    b.batch_no, s.name AS spec_name,
     s.outer_lower_mm, s.outer_upper_mm, s.wall_lower_mm, s.wall_upper_mm, s.ovality_upper_mm
     FROM ppr_product_measurement m
     JOIN ppr_batch b ON b.id = m.batch_id
@@ -292,12 +333,16 @@ export async function evaluateAlerts(options: { batchIds?: number[] } = {}): Pro
   }
 
   const measurementIds = rows.map((row) => Number(row.id));
+  const rowById = new Map(rows.map((row) => [Number(row.id), row]));
+  /** 事务提交后要推送到企微的中高风险事件（推送状态在事务里读取，实际发送在提交后）。 */
+  const pushItems: AlertPushItem[] = [];
   await dbClient.transaction(async (client: TransactionClient) => {
     const placeholders = measurementIds.map(() => '?').join(',');
     const metricPlaceholders = ENGINE_METRIC_CODES.map(() => '?').join(',');
     // 只看引擎自己产出的事件（source='engine'），并取出「是否已被归档 8D 报告引用」：
     // 归档链上的事件被外键 RESTRICT 保护，过期时只能关闭、不能删除。
-    const existingRows = await client.queryAll(`SELECT a.id, a.measurement_id, a.metric_code, a.status,
+    // notified_level 是企微推送去重状态：只有级别高于它的新异常才需要再推一次。
+    const existingRows = await client.queryAll(`SELECT a.id, a.measurement_id, a.metric_code, a.status, a.notified_level,
       (SELECT COUNT(*) FROM ppr_analysis_run r
         JOIN ppr_eight_d_report d ON d.analysis_id = r.id
         JOIN ppr_history_archive h ON h.report_id = d.id
@@ -310,17 +355,29 @@ export async function evaluateAlerts(options: { batchIds?: number[] } = {}): Pro
     const existingByKey = new Map(existing.map((row) => [`${row.measurement_id}:${row.metric_code}`, row]));
     const keptIds = new Set<number>();
     const inserts: PlannedAlert[] = [];
+    /** 新增的中高风险事件：此刻还没有 id，INSERT 后回查再补成推送项。 */
+    const newPushCandidates: PlannedAlert[] = [];
 
     for (const alert of alerts) {
       const current = existingByKey.get(`${alert.measurementId}:${alert.metricCode}`);
-      if (!current) { inserts.push(alert); continue; }
+      const abnormal = alert.riskLevel !== 'normal';
+      if (!current) {
+        inserts.push(alert);
+        if (abnormal) newPushCandidates.push(alert);
+        continue;
+      }
       keptIds.add(Number(current.id));
       // 原地更新而不是删了重建：事件ID 是诊断 / 8D 报告 / 历史归档的外键，必须保持稳定。
       // 已进入「分析中」的事件不因为重新扫描被打回「待分析」。
       const status = alert.riskLevel === 'normal' ? 'closed' : (current.status === 'analyzing' ? 'analyzing' : 'open');
+      if (abnormal && LEVEL_WEIGHT[alert.riskLevel] > notifiedWeight(current.notified_level)) {
+        pushItems.push(buildPushItem(Number(current.id), alert, rowById.get(alert.measurementId)));
+      }
+      // 事件回到正常时清空推送状态：同一记录以后再次异常要能重新告警。
+      const resetNotify = alert.riskLevel === 'normal' ? ', notified_level=NULL, notified_at=NULL' : '';
       await client.query(
         `UPDATE ppr_alert_event SET event_no=?, risk_level=?, rule_code=?, rule_name=?,
-          observed_value=?, threshold_text=?, status=?, detected_at=? WHERE id=?`,
+          observed_value=?, threshold_text=?, status=?, detected_at=?${resetNotify} WHERE id=?`,
         [alert.eventNo, alert.riskLevel, alert.ruleCode, alert.ruleName, alert.observedValue, alert.thresholdText, status, alert.detectedAt, current.id]
       );
     }
@@ -334,7 +391,7 @@ export async function evaluateAlerts(options: { batchIds?: number[] } = {}): Pro
     }
     if (closable.length) {
       await client.query(
-        `UPDATE ppr_alert_event SET status='closed', threshold_text=? WHERE id IN (${closable.map(() => '?').join(',')})`,
+        `UPDATE ppr_alert_event SET status='closed', notified_level=NULL, notified_at=NULL, threshold_text=? WHERE id IN (${closable.map(() => '?').join(',')})`,
         ['该指标当前不可判定（实测值缺失或规格限值不完整），事件已关闭；已归档报告的追溯链保留', ...closable]
       );
     }
@@ -359,6 +416,25 @@ export async function evaluateAlerts(options: { batchIds?: number[] } = {}): Pro
           alert.detectedAt,
         ])
       );
+      // 批量 INSERT 拿不到每条的自增ID，按 (measurement_id, metric_code) 回查一次，
+      // 只取本次新增的那几条，用于推送成功后回写 notified_level。
+      if (newPushCandidates.length) {
+        const wantedKeys = new Set(newPushCandidates.map((alert) => `${alert.measurementId}:${alert.metricCode}`));
+        const idRows = await client.queryAll(
+          `SELECT id, measurement_id, metric_code FROM ppr_alert_event
+           WHERE measurement_id IN (${placeholders}) AND metric_code IN (${metricPlaceholders})`,
+          [...measurementIds, ...ENGINE_METRIC_CODES]
+        ) as unknown as { id: number; measurement_id: number; metric_code: string }[];
+        const idByKey = new Map(
+          idRows
+            .filter((row) => wantedKeys.has(`${row.measurement_id}:${row.metric_code}`))
+            .map((row) => [`${row.measurement_id}:${row.metric_code}`, Number(row.id)])
+        );
+        for (const alert of newPushCandidates) {
+          const id = idByKey.get(`${alert.measurementId}:${alert.metricCode}`);
+          if (id) pushItems.push(buildPushItem(id, alert, rowById.get(alert.measurementId)));
+        }
+      }
     }
     // 质量标记跟随判定结果；error 是数据来源层面的错误标记，引擎不覆盖。
     for (const level of ['high', 'medium', 'normal'] as AlertLevel[]) {
@@ -370,6 +446,16 @@ export async function evaluateAlerts(options: { batchIds?: number[] } = {}): Pro
       );
     }
   });
+
+  // 推送必须在事务提交之后入队：事务里的数据可能回滚，且外发请求不应占用数据库连接。
+  // 入队本身不做网络请求，失败也不会影响判定结果——真正的发送由合并队列在后台完成。
+  if (pushItems.length) {
+    try {
+      queueAlertPush(pushItems);
+    } catch (cause) {
+      console.error('[AlertEngine] 企微推送入队失败', cause);
+    }
+  }
 
   return {
     batches: grouped.size,

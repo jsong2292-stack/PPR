@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import {
-  AlertTriangle, Archive, ChevronDown, ChevronLeft, ChevronRight, ClipboardCheck, Gauge, ShieldCheck,
+  AlertTriangle, Archive, ChevronDown, ChevronLeft, ChevronRight, ClipboardCheck, ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-client';
@@ -12,7 +12,7 @@ import { ADMIN_MENU_GROUPS } from '@/lib/admin-menu';
 
 const flows = [
   { label: '质量监控与预警', href: '/quality/monitor', icon: AlertTriangle },
-  { label: '异常诊断与验证', href: '/quality/diagnosis', icon: Gauge },
+  // 「异常诊断与验证」不再单独挂在导航上：诊断页由预警队列的「进入诊断」按钮进入，并自动定位该事件的异常指标。
   { label: '8D 报告工作台', href: '/quality/report', icon: ClipboardCheck },
   { label: '历史分析', href: '/quality/history', icon: Archive },
 ];

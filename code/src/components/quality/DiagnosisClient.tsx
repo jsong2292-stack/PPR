@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { MetricTrendCard } from './MetricTrendCard';
 import { PageHeader } from './PageHeader';
 
 type Row = Record<string, unknown>;
@@ -27,6 +28,7 @@ const decisionStyles: Record<string, string> = {
 export function DiagnosisClient() {
   const search = useSearchParams();
   const [alerts, setAlerts] = useState<Row[]>([]);
+  const [measurements, setMeasurements] = useState<Row[]>([]);
   const [alertId, setAlertId] = useState(search.get('alertId') || '');
   const [analysis, setAnalysis] = useState<Row | null>(null);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
@@ -39,6 +41,7 @@ export function DiagnosisClient() {
     const json = await response.json();
     if (response.ok) {
       setAlerts(json.alerts || []);
+      setMeasurements(json.measurements || []);
       if (!alertId && json.alerts?.[0]) setAlertId(String(json.alerts[0].id));
     }
   }, [alertId]);
@@ -159,6 +162,9 @@ export function DiagnosisClient() {
       {[['预警事件', selected.event_no], ['生产批次', selected.batch_no], ['触发规则', `${selected.rule_code} · ${selected.rule_name}`], ['观测值', `${selected.observed_value ?? '—'} mm`]].map(([label, value]) =>
         <Card key={String(label)} className="border-slate-200 shadow-sm"><CardContent className="p-4"><span className="text-xs text-slate-500">{String(label)}</span><b className="mt-1 block text-sm text-slate-900">{String(value)}</b></CardContent></Card>)}
     </div>}
+
+    {/* 趋势图跟随所选事件：key 绑定事件 id，切换事件即重置视图并自动定位到该事件的异常指标、规格与批次。 */}
+    {selected && <MetricTrendCard key={alertId} measurements={measurements} focus={{ metricCode: String(selected.metric_code ?? ''), specName: String(selected.spec_name ?? ''), batchNo: String(selected.batch_no ?? '') }} />}
 
     {loading ? <div className="grid h-64 place-items-center"><Loader2 className="animate-spin text-blue-700" /></div> : !analysis ?
       <Card className="border-dashed border-slate-300"><CardContent className="grid h-64 place-items-center text-center"><div><Bot className="mx-auto mb-3 text-slate-400" /><b>尚未生成诊断分析</b><p className="mt-1 text-sm text-slate-500">选择模式后生成分析，系统会保存证据、工具轨迹和待验证结论。</p></div></CardContent></Card> : <>

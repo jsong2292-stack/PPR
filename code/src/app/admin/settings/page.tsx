@@ -20,6 +20,11 @@ interface ConfigState {
   quality_agent_fallback_to_rule: string;
   quality_agent_max_tool_rounds: string;
   quality_agent_reasoning_effort: string;
+  wecom_alert_enabled: string;
+  wecom_alert_webhook: string;
+  wecom_alert_min_level: string;
+  wecom_alert_mention_list: string;
+  wecom_alert_mention_all: string;
 }
 
 const DEFAULTS: ConfigState = {
@@ -33,6 +38,11 @@ const DEFAULTS: ConfigState = {
   quality_agent_fallback_to_rule: 'true',
   quality_agent_max_tool_rounds: '8',
   quality_agent_reasoning_effort: 'low',
+  wecom_alert_enabled: 'false',
+  wecom_alert_webhook: '',
+  wecom_alert_min_level: 'medium',
+  wecom_alert_mention_list: '',
+  wecom_alert_mention_all: 'false',
 };
 
 /** 系统设置：读取 / 写入 system_config 表 */
@@ -42,6 +52,7 @@ export default function AdminSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [rawConfig, setRawConfig] = useState<Record<string, string>>({});
   const [agentConfigured, setAgentConfigured] = useState(false);
+  const [testingPush, setTestingPush] = useState(false);
 
   useEffect(() => {
     fetch('/api/admin/config', { credentials: 'same-origin' })
@@ -88,6 +99,30 @@ export default function AdminSettingsPage() {
     save({ [key]: next });
   };
 
+  const testPush = async () => {
+    setTestingPush(true);
+    try {
+      const res = await fetch('/api/quality/alerts/notify-test', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ webhook: config.wecom_alert_webhook.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        toast.error(data.error || '测试推送失败');
+        return;
+      }
+      const notify = data.notify as { pushed?: number; skipped?: string } | undefined;
+      const extra = notify?.pushed ? `，同时补推了 ${notify.pushed} 条待推送告警` : '';
+      toast.success(`测试消息已发送${extra}`);
+    } catch {
+      toast.error('网络错误');
+    } finally {
+      setTestingPush(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-10">
@@ -104,6 +139,7 @@ export default function AdminSettingsPage() {
         <TabsList>
           <TabsTrigger value="feature">功能开关</TabsTrigger>
           <TabsTrigger value="quality-agent">质量 Agent</TabsTrigger>
+          <TabsTrigger value="alert-push">预警推送</TabsTrigger>
           <TabsTrigger value="upload">上传与预览</TabsTrigger>
           <TabsTrigger value="raw">全部配置</TabsTrigger>
         </TabsList>
@@ -197,6 +233,111 @@ export default function AdminSettingsPage() {
                 quality_agent_max_tool_rounds: config.quality_agent_max_tool_rounds,
                 quality_agent_reasoning_effort: config.quality_agent_reasoning_effort,
               })}>保存Agent参数</Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* 企微预警推送 */}
+        <TabsContent value="alert-push">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">企业微信预警推送</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <SwitchRow
+                label="推送中/高风险预警"
+                description="预警判定引擎产出中风险或高风险事件时，把告警发送到企业微信群机器人。仅在事件新产生或风险升级时推送，重复导入不会重复告警。"
+                checked={config.wecom_alert_enabled === 'true'}
+                onChange={(value) => setFlag('wecom_alert_enabled', value)}
+              />
+
+              <div className="space-y-2">
+                <Label htmlFor="wecomWebhook">机器人 Webhook 地址</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="wecomWebhook"
+                    placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxxxx"
+                    value={config.wecom_alert_webhook}
+                    onChange={(event) => setConfig((prev) => ({ ...prev, wecom_alert_webhook: event.target.value }))}
+                  />
+                  <Button
+                    variant="outline"
+                    disabled={saving}
+                    onClick={() => save({ wecom_alert_webhook: config.wecom_alert_webhook.trim() })}
+                  >
+                    保存
+                  </Button>
+                </div>
+                <p className="text-xs text-gray-400">
+                  在企业微信群里「添加群机器人」后复制 Webhook 地址。地址含密钥，接口返回与日志中已做掩码；环境变量
+                  WECOM_ALERT_WEBHOOK 可作为部署级兜底。
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="wecomMinLevel">最低推送级别</Label>
+                <div className="flex items-end gap-2">
+                  <select
+                    id="wecomMinLevel"
+                    className="h-9 w-full max-w-[220px] rounded-md border border-input bg-transparent px-3 text-sm"
+                    value={config.wecom_alert_min_level}
+                    onChange={(event) => setConfig((prev) => ({ ...prev, wecom_alert_min_level: event.target.value }))}
+                  >
+                    <option value="medium">中风险及以上（高风险 + 中风险）</option>
+                    <option value="high">仅高风险</option>
+                  </select>
+                  <Button
+                    variant="outline"
+                    disabled={saving}
+                    onClick={() => save({ wecom_alert_min_level: config.wecom_alert_min_level })}
+                  >
+                    保存
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="wecomMentionList">@ 指定成员（userid）</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="wecomMentionList"
+                    placeholder="例如 zhangsan,lisi（多个用逗号分隔，留空不@人）"
+                    value={config.wecom_alert_mention_list}
+                    onChange={(event) => setConfig((prev) => ({ ...prev, wecom_alert_mention_list: event.target.value }))}
+                  />
+                  <Button
+                    variant="outline"
+                    disabled={saving}
+                    onClick={() => save({ wecom_alert_mention_list: config.wecom_alert_mention_list.trim() })}
+                  >
+                    保存
+                  </Button>
+                </div>
+                <p className="text-xs text-gray-400">
+                  填企业微信成员账号（userid，不是姓名或手机号），会在告警消息里用 <code>{'<@userid>'}</code> 语法提醒对方。
+                </p>
+                <div className="pt-2">
+                  <SwitchRow
+                    label="@所有人"
+                    description="开启后每条中/高风险预警都会 @所有人，请谨慎使用（建议只在高风险场景开启）。"
+                    checked={config.wecom_alert_mention_all === 'true'}
+                    onChange={(value) => setFlag('wecom_alert_mention_all', value)}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="outline"
+                  disabled={testingPush}
+                  onClick={testPush}
+                >
+                  {testingPush ? '发送中…' : '发送测试消息'}
+                </Button>
+                <span className="text-xs text-gray-400">
+                  用上方填写的地址试打一条测试消息（无需先保存）；同时会把待推送队列立即发出。
+                </span>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

@@ -10,7 +10,6 @@ export const siteConfig={
   copyright:process.env.NEXT_PUBLIC_SITE_COPYRIGHT||'© PPR质量智能分析助手', owner:process.env.NEXT_PUBLIC_SITE_OWNER||'',
   nav:[
     {label:'质量工作台',href:'/quality/monitor'},
-    {label:'数据源管理',href:'#',children:[{label:'产品数据',href:'/quality/data/measurements'},{label:'设备采集数据',href:'/quality/data/readings'},{label:'批次基础信息',href:'/quality/data/batches'}]},
     {label:'异常诊断',href:'/quality/diagnosis'},
     {label:'8D报告',href:'/quality/report'},
     {label:'历史分析',href:'/quality/history'},

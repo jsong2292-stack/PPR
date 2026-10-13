@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isMasterResource, normalizeValue, RESOURCE_CONFIG, dbClient } from '@/lib/quality';
-import { getCurrentUser } from '@/lib/auth';
+import { requireAdmin } from '@/lib/auth';
+import { failFrom } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -8,8 +9,18 @@ function error(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
+/** 系统管理 / 数据源管理属于后台能力，仅管理员可读写 */
+async function adminGuard(): Promise<NextResponse | null> {
+  try {
+    await requireAdmin();
+    return null;
+  } catch (cause) {
+    return failFrom(cause, '无权限操作');
+  }
+}
+
 export async function GET(_request: NextRequest, context: { params: Promise<{ resource: string }> }) {
-  if (!(await getCurrentUser())) return NextResponse.json({ error: '请先登录' }, { status: 401 });
+  const denied = await adminGuard(); if (denied) return denied;
   const { resource } = await context.params;
   if (!isMasterResource(resource)) return error('不支持的数据资源', 404);
   try {
@@ -22,7 +33,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ re
 }
 
 export async function POST(request: NextRequest, context: { params: Promise<{ resource: string }> }) {
-  if (!(await getCurrentUser())) return NextResponse.json({ error: '请先登录' }, { status: 401 });
+  const denied = await adminGuard(); if (denied) return denied;
   const { resource } = await context.params;
   if (!isMasterResource(resource)) return error('不支持的数据资源', 404);
   const config = RESOURCE_CONFIG[resource];
@@ -45,7 +56,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ re
 }
 
 export async function PUT(request: NextRequest, context: { params: Promise<{ resource: string }> }) {
-  if (!(await getCurrentUser())) return NextResponse.json({ error: '请先登录' }, { status: 401 });
+  const denied = await adminGuard(); if (denied) return denied;
   const { resource } = await context.params;
   if (!isMasterResource(resource)) return error('不支持的数据资源', 404);
   const config = RESOURCE_CONFIG[resource];
@@ -68,7 +79,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ res
 }
 
 export async function DELETE(request: NextRequest, context: { params: Promise<{ resource: string }> }) {
-  if (!(await getCurrentUser())) return NextResponse.json({ error: '请先登录' }, { status: 401 });
+  const denied = await adminGuard(); if (denied) return denied;
   const { resource } = await context.params;
   if (!isMasterResource(resource)) return error('不支持的数据资源', 404);
   const config = RESOURCE_CONFIG[resource];

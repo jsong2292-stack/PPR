@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { Users, FileUp, Bell, HardDrive, Settings, UserCog, Send } from 'lucide-react';
+import { ADMIN_MENU_GROUPS } from '@/lib/admin-menu';
 
 interface Stats {
   totalUsers: number;
@@ -70,7 +71,7 @@ export default function AdminDashboardPage() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">管理后台</h1>
-          <p className="mt-1 text-sm text-gray-500">脚手架自带的基础运维能力</p>
+          <p className="mt-1 text-sm text-gray-500">基础运维能力与基础数据维护入口（仅管理员可见）</p>
         </div>
         <div className="flex gap-2">
           <Link href="/admin/users">
@@ -86,6 +87,36 @@ export default function AdminDashboardPage() {
             </Button>
           </Link>
         </div>
+      </div>
+
+      <div className="mb-8 grid gap-4 md:grid-cols-2">
+        {ADMIN_MENU_GROUPS.map((group) => {
+          const GroupIcon = group.icon;
+          return (
+            <Card key={group.key}>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <GroupIcon className="h-4 w-4 text-blue-600" />
+                  {group.label}
+                </CardTitle>
+                <p className="text-xs text-gray-500">{group.description}</p>
+              </CardHeader>
+              <CardContent className="grid gap-2 sm:grid-cols-2">
+                {group.items.map((item) => {
+                  const ItemIcon = item.icon;
+                  return (
+                    <Link key={item.href} href={item.href} className="block">
+                      <Button variant="outline" className="w-full justify-start">
+                        <ItemIcon className="mr-2 h-4 w-4" />
+                        {item.label}
+                      </Button>
+                    </Link>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
       {loading ? (

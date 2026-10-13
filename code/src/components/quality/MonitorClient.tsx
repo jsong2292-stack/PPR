@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { PageHeader } from './PageHeader';
 
 type Row = Record<string, unknown>;
-const metricLabels: Record<string,string> = { outer_diameter:'外径', min_wall_thickness:'最小壁厚', ovality:'不圆度' };
+const metricLabels: Record<string,string> = { outer_diameter:'外径', min_wall_thickness:'壁厚', ovality:'不圆度' };
 const riskStyles: Record<string,string> = { normal:'bg-emerald-50 text-emerald-700', medium:'bg-amber-50 text-amber-700', high:'bg-red-50 text-red-700', error:'bg-violet-50 text-violet-700' };
 const riskLabels: Record<string,string> = { normal:'正常', medium:'中风险', high:'高风险', error:'数据核对' };
 

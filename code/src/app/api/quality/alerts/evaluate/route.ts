@@ -15,7 +15,7 @@ export async function POST() {
     for (const row of rows) {
       const checks = [
         { code: 'outer_diameter', value: row.outer_diameter_mm as number | null, low: Number(row.outer_lower_mm), high: Number(row.outer_upper_mm), rule: 'R3', name: '外径演示限值对照' },
-        { code: 'min_wall_thickness', value: row.min_wall_thickness_mm as number | null, low: Number(row.wall_lower_mm), high: Number(row.wall_upper_mm), rule: 'R3', name: '最小壁厚演示限值对照' },
+        { code: 'min_wall_thickness', value: row.min_wall_thickness_mm as number | null, low: Number(row.wall_lower_mm), high: Number(row.wall_upper_mm), rule: 'R3', name: '壁厚与标准壁厚对照' },
         { code: 'ovality', value: row.ovality_mm as number | null, low: 0, high: Number(row.ovality_upper_mm), rule: 'R3', name: '不圆度演示限值对照' },
       ];
       for (const check of checks) {

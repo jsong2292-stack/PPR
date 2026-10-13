@@ -239,8 +239,8 @@ CREATE TABLE IF NOT EXISTS ppr_product_spec (
   wall_thickness_mm DECIMAL(10,3) NOT NULL COMMENT '公称壁厚，单位mm',
   outer_lower_mm DECIMAL(10,3) NOT NULL COMMENT '外径演示下限，单位mm',
   outer_upper_mm DECIMAL(10,3) NOT NULL COMMENT '外径演示上限，单位mm',
-  wall_lower_mm DECIMAL(10,3) NOT NULL COMMENT '最小壁厚演示下限，单位mm',
-  wall_upper_mm DECIMAL(10,3) NOT NULL COMMENT '最小壁厚演示上限，单位mm',
+  wall_lower_mm DECIMAL(10,3) NOT NULL COMMENT '标准壁厚演示下限，单位mm',
+  wall_upper_mm DECIMAL(10,3) NOT NULL COMMENT '标准壁厚演示上限，单位mm',
   ovality_upper_mm DECIMAL(10,3) NOT NULL COMMENT '不圆度演示上限，单位mm',
   status ENUM('enabled','disabled') NOT NULL DEFAULT 'enabled' COMMENT '状态：enabled启用、disabled停用',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -328,7 +328,7 @@ CREATE TABLE IF NOT EXISTS ppr_product_measurement (
   batch_id BIGINT UNSIGNED NOT NULL COMMENT '所属生产批次ID',
   inspect_time DATETIME NOT NULL COMMENT '检验时间',
   outer_diameter_mm DECIMAL(10,3) NULL COMMENT '外径测量值，单位mm',
-  min_wall_thickness_mm DECIMAL(10,3) NULL COMMENT '最小壁厚，单位mm',
+  min_wall_thickness_mm DECIMAL(10,3) NULL COMMENT '壁厚，单位mm',
   max_wall_thickness_mm DECIMAL(10,3) NULL COMMENT '最大壁厚，单位mm',
   max_outer_diameter_mm DECIMAL(10,3) NULL COMMENT '同截面最大外径，单位mm',
   min_outer_diameter_mm DECIMAL(10,3) NULL COMMENT '同截面最小外径，单位mm',
@@ -521,13 +521,13 @@ ON DUPLICATE KEY UPDATE spec_id=VALUES(spec_id), production_group=VALUES(product
 
 INSERT INTO ppr_metric (id, code, name, unit, lower_limit, upper_limit, influences, description, status) VALUES
   (1, 'outer_diameter', '外径', 'mm', 25.0000, 25.5000, '定径套、真空度、冷却水温、牵引速度', '测量管材外径；正式判定以适用标准和产品规格为准', 'enabled'),
-  (2, 'min_wall_thickness', '最小壁厚', 'mm', 4.2000, 4.8000, '挤出量、牵引速度、模具偏心、原料波动', '仅最薄点不能代表整体壁厚分布', 'enabled'),
+  (2, 'min_wall_thickness', '壁厚', 'mm', 4.2000, 4.8000, '挤出量、牵引速度、模具偏心、原料波动', '仅最薄点不能代表整体壁厚分布', 'enabled'),
   (3, 'ovality', '不圆度', 'mm', 0.0000, 0.3500, '定径冷却、支撑、牵引、测量截面', '同一样管同一截面最大外径减最小外径', 'enabled')
 ON DUPLICATE KEY UPDATE name=VALUES(name), unit=VALUES(unit), lower_limit=VALUES(lower_limit), upper_limit=VALUES(upper_limit), influences=VALUES(influences), status=VALUES(status);
 
 INSERT INTO ppr_product_measurement (id, record_no, sample_no, batch_id, inspect_time, outer_diameter_mm, min_wall_thickness_mm, max_wall_thickness_mm, max_outer_diameter_mm, min_outer_diameter_mm, ovality_mm, data_source, quality_flag, remark) VALUES
   (1, 'IR-20261010-001', 'S-001', 1, '2026-10-10 08:20:00', 25.230, 4.320, 4.430, 25.310, 25.120, 0.190, 'QMS', 'normal', '基线点'),
-  (2, 'IR-20261010-002', 'S-002', 1, '2026-10-10 09:05:00', 25.240, 4.290, 4.410, 25.330, 25.110, 0.220, 'QMS', 'medium', '最小壁厚呈下降趋势'),
+  (2, 'IR-20261010-002', 'S-002', 1, '2026-10-10 09:05:00', 25.240, 4.290, 4.410, 25.330, 25.110, 0.220, 'QMS', 'medium', '壁厚呈下降趋势'),
   (3, 'IR-20261010-003', 'S-003', 1, '2026-10-10 09:37:00', 25.250, 4.260, 4.390, 25.350, 25.100, 0.250, 'QMS', 'medium', '连续趋势触发'),
   (4, 'IR-20261010-004', 'S-004', 1, '2026-10-10 10:15:00', 25.260, 4.310, 4.420, 25.360, 25.120, 0.240, 'QMS', 'normal', '趋势恢复'),
   (5, 'IR-20261011-001', 'S-101', 2, '2026-10-11 08:00:00', 25.220, 4.340, 4.460, 25.320, 25.100, 0.220, 'QMS', 'normal', '参考批次'),

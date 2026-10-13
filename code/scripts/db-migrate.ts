@@ -15,12 +15,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import process from 'node:process';
-import { loadEnv } from '../src/lib/env';
-
-loadEnv();
-
-import { config } from '../src/lib/config';
-import { connectAs, migrationCredentials, runStatements, splitStatements } from './lib/db-utils';
+import {
+  connectAs,
+  initScriptEnv,
+  migrationCredentials,
+  runStatements as _runStatements,
+  splitStatements,
+  type ScriptDbConfig,
+} from './lib/db-utils';
 
 const MIGRATIONS_DIR = path.join(process.cwd(), 'db', 'migrations');
 const LEDGER_TABLE = 'schema_migration';
@@ -86,10 +88,11 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log(`数据库：${config.db.host}:${config.db.port}/${config.db.database}`);
-  console.log(`身份：${migrationCredentials().uses}`);
+  const db: ScriptDbConfig = initScriptEnv();
+  console.log(`数据库：${db.host}:${db.port}/${db.database}`);
+  console.log(`身份：${migrationCredentials(db).uses}`);
 
-  const conn = await connectAs();
+  const conn = await connectAs(db);
   try {
     await ensureLedger(conn);
     const [rows] = await conn.query<any[]>(`SELECT name, checksum FROM ${LEDGER_TABLE}`);
@@ -119,7 +122,7 @@ async function main(): Promise<void> {
         }
         await conn.query(
           `INSERT INTO ${LEDGER_TABLE} (name, checksum, statements, applied_by) VALUES (?,?,?,?)`,
-          [m.name, m.checksum, m.statements.length, migrationCredentials().user],
+          [m.name, m.checksum, m.statements.length, migrationCredentials(db).user],
         );
         console.log(`完成（${m.statements.length} 条语句）`);
         continue;

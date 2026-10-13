@@ -1,63 +1,88 @@
 /**
- * 数据库连接工具（脚本用）。
+ * 脚本侧数据库工具。
  *
- * 迁移/种子脚本需要 DDL 权限，而应用账号 `ppr_app` 只有 DML 权限，
- * 因此脚本使用 `DB_MIGRATION_USER` / `DB_MIGRATION_PASSWORD` 建立一次性连接。
- * 若未配置迁移账号，则回退到应用账号（并要求 DBA 已授权）。
+ * 与 `src/lib/db.ts` 的区别：
+ *   - 应用运行时用连接池（长连接、并发复用）；
+ *   - 脚本用一次性连接（迁移 / 校验 / 冒烟跑完即退出），并使用权限更高的迁移账号。
+ *
+ * 为什么这里用 initScriptEnv() 显式加载环境变量，而不是在模块顶层 import config：
+ *   ES 模块的 import 会被提升到所有语句之前执行，`import { config }` 会在
+ *   `loadEnv()` 之前求值，导致脚本读不到 .env.local。因此本模块只导出工厂函数，
+ *   由脚本在加载环境变量之后调用。
  */
 import mysql from 'mysql2/promise';
-import { config, assertDatabaseConfig } from '../src/lib/config';
+import { loadEnv } from '../../src/lib/env';
+import { config, assertDatabaseConfig, type AppConfig } from '../../src/lib/config';
+
+export type ScriptDbConfig = AppConfig['db'];
 
 export interface ConnOptions {
   multipleStatements?: boolean;
 }
 
-export function migrationCredentials(): { user: string; password: string; uses: string } {
-  if (config.db.migrationUser && config.db.migrationPassword) {
+/**
+ * 脚本入口第一件事：加载 .env* 并返回可用于连库的配置。
+ * 必须在任何连库动作之前调用。
+ */
+export function initScriptEnv(): ScriptDbConfig {
+  loadEnv();
+  return config.db;
+}
+
+export function migrationCredentials(db: ScriptDbConfig = config.db): {
+  user: string;
+  password: string;
+  uses: string;
+} {
+  if (db.migrationUser && db.migrationPassword) {
     return {
-      user: config.db.migrationUser,
-      password: config.db.migrationPassword,
-      uses: `迁移账号 ${config.db.migrationUser}`,
+      user: db.migrationUser,
+      password: db.migrationPassword,
+      uses: `迁移账号 ${db.migrationUser}`,
     };
   }
   return {
-    user: config.db.user,
-    password: config.db.password,
-    uses: `应用账号 ${config.db.user}（未配置 DB_MIGRATION_USER）`,
+    user: db.user,
+    password: db.password,
+    uses: `应用账号 ${db.user}（未配置 DB_MIGRATION_USER）`,
   };
 }
 
-export async function connectAs(options: ConnOptions = {}): Promise<mysql.Connection> {
+function baseConnectionOptions(db: ScriptDbConfig) {
+  return {
+    host: db.host,
+    port: db.port,
+    database: db.database,
+    charset: 'utf8mb4',
+    timezone: db.timezone,
+    dateStrings: true as const,
+    decimalNumbers: false as const,
+    ssl: db.ssl ? { rejectUnauthorized: false } : undefined,
+  };
+}
+
+/** 以迁移账号（或回退到应用账号）建立一次性连接 */
+export async function connectAs(
+  db: ScriptDbConfig,
+  options: ConnOptions = {},
+): Promise<mysql.Connection> {
   assertDatabaseConfig();
-  const { user, password } = migrationCredentials();
+  const { user, password } = migrationCredentials(db);
   return mysql.createConnection({
-    host: config.db.host,
-    port: config.db.port,
+    ...baseConnectionOptions(db),
     user,
     password,
-    database: config.db.database,
-    charset: 'utf8mb4',
-    timezone: config.db.timezone,
-    dateStrings: true,
-    decimalNumbers: false,
     multipleStatements: options.multipleStatements ?? false,
-    ssl: config.db.ssl ? { rejectUnauthorized: false } : undefined,
   });
 }
 
-export async function connectAsApp(): Promise<mysql.Connection> {
+/** 以应用账号建立一次性连接，用于验证应用账号的真实权限 */
+export async function connectAsApp(db: ScriptDbConfig): Promise<mysql.Connection> {
   assertDatabaseConfig();
   return mysql.createConnection({
-    host: config.db.host,
-    port: config.db.port,
-    user: config.db.user,
-    password: config.db.password,
-    database: config.db.database,
-    charset: 'utf8mb4',
-    timezone: config.db.timezone,
-    dateStrings: true,
-    decimalNumbers: false,
-    ssl: config.db.ssl ? { rejectUnauthorized: false } : undefined,
+    ...baseConnectionOptions(db),
+    user: db.user,
+    password: db.password,
   });
 }
 
@@ -65,7 +90,7 @@ export async function connectAsApp(): Promise<mysql.Connection> {
  * 把一段 SQL 文本切成可逐条执行的语句。
  *
  * 只处理本项目实际使用的 SQL 形态（无存储过程/触发器/自定义 DELIMITER）：
- * - 去掉 `--` 行注释与 `/* *​/` 块注释；
+ * - 去掉 `--` 行注释与块注释；
  * - 按分号切分，忽略字符串字面量内部的分号（'...' / "..." / `...`）。
  * 遇到无法安全切分的语句会原样返回，让 MySQL 报错，而不是静默丢弃。
  */
@@ -116,7 +141,7 @@ export function splitStatements(sql: string): string[] {
   return statements;
 }
 
-/** 逐条执行 SQL，遇到错误立即抛出并带上语句位置。 */
+/** 逐条执行 SQL，遇到错误立即抛出并带上语句位置 */
 export async function runStatements(conn: mysql.Connection, statements: string[]): Promise<number> {
   let executed = 0;
   for (const statement of statements) {
@@ -130,4 +155,35 @@ export async function runStatements(conn: mysql.Connection, statements: string[]
     }
   }
   return executed;
+}
+
+/**
+ * 执行拆分后的语句，但 **忽略** 指定错误码。
+ *
+ * 迁移脚本需要「幂等」：例如 `ADD COLUMN` 在列已存在时应视为成功。
+ * MySQL 没有 `ADD COLUMN IF NOT EXISTS`，所以用错误码白名单实现。
+ */
+export async function runStatementsIgnoring(
+  conn: mysql.Connection,
+  statements: string[],
+  ignorableCodes: string[],
+): Promise<{ executed: number; skipped: number }> {
+  let executed = 0;
+  let skipped = 0;
+  for (const statement of statements) {
+    try {
+      await conn.query(statement);
+      executed += 1;
+    } catch (error) {
+      const code = (error as { code?: string }).code ?? '';
+      if (ignorableCodes.includes(code)) {
+        skipped += 1;
+        continue;
+      }
+      const preview = statement.replace(/\s+/g, ' ').slice(0, 180);
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`语句执行失败：${message}\nSQL: ${preview}…`);
+    }
+  }
+  return { executed, skipped };
 }

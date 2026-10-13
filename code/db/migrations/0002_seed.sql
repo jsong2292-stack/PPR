@@ -33,30 +33,30 @@ INSERT INTO sys_user (id, username, password_hash, must_reset_password, display_
 -- 角色分配：admin / 质量工程师 / 生产领班 / 设备工程师 / 质量负责人
 INSERT INTO sys_user_role (user_id, role_id) VALUES (1, 1), (2, 3), (3, 4), (4, 5), (5, 2);
 
--- ---------- 数据来源字典（原型来源文案，全部标记为模拟来源） ----------
+-- ---------- 数据来源字典（早期方案来源文案，全部标记为模拟来源） ----------
 INSERT INTO data_source (id, code, name, system_type, is_simulated, description, sort_no) VALUES
-  (1, 'manual_entry', '演示录入', 'manual', 1, '原型本地录入的模拟数据', 1),
+  (1, 'manual_entry', '生产录入', 'manual', 1, '早期方案本地录入的模拟数据', 1),
   (2, 'mes_demo', 'MES模拟', 'mes', 1, '模拟 MES 生产数据，未接入真实 MES', 2),
   (3, 'qms_demo', 'QMS模拟', 'qms', 1, '模拟 QMS 检验数据，未接入真实 QMS', 3),
   (4, 'device_demo', '设备采集', 'device', 1, '模拟设备逐小时采集数据，未接入真实数采', 4),
-  (5, 'local_mock', '本地 Mock Data', 'other', 1, '原型抽检记录的本地模拟数据集', 5),
-  (6, 'virtual_process_data', '虚拟工艺数据', 'other', 1, '原型温区/牵引模拟工艺数据', 6);
+  (5, 'local_mock', '本地 模拟数据', 'other', 1, '早期方案抽检记录的本地模拟数据集', 5),
+  (6, 'virtual_process_data', '虚拟工艺数据', 'other', 1, '早期方案温区/牵引模拟工艺数据', 6);
 
 -- ---------- B. 产线、产品类别、规格、设备 ----------
-INSERT INTO production_line (id, code, name, workshop, description) VALUES (1, 'LINE-A', '演示线 A', '演示车间', '原型中的演示产线');
+INSERT INTO production_line (id, code, name, workshop, description) VALUES (1, 'LINE-A', '模拟线 A', '模拟车间', '模拟产线');
 
-INSERT INTO product_category (id, code, name, description) VALUES (1, 'CAT-PPR', 'PPR 管材', '演示主数据');
+INSERT INTO product_category (id, code, name, description) VALUES (1, 'CAT-PPR', 'PPR 管材', '模拟主数据');
 
 INSERT INTO product_spec (id, code, name, category_id, nominal_outer_diameter_mm, nominal_wall_thickness_mm, ovality_max_mm, status) VALUES
   (1, 'SPEC-25-42', '25×4.2', 1, 25.000, 4.200, 0.350, 'enabled');
 
 INSERT INTO equipment_type (id, code, name, description) VALUES
-  (1, 'ETYPE-EXTRUDER', '挤出机', '演示设备类型'),
-  (2, 'ETYPE-HAULOFF', '牵引机', '演示设备类型');
+  (1, 'ETYPE-EXTRUDER', '挤出机', '模拟设备类型'),
+  (2, 'ETYPE-HAULOFF', '牵引机', '模拟设备类型');
 
 INSERT INTO equipment (id, code, name, type_id, line_id, status, description) VALUES
-  (1, 'EQ-EX-01', '挤出机-01', 1, 1, 'enabled', '演示设备'),
-  (2, 'EQ-HO-01', '牵引机-01', 2, 1, 'enabled', '演示设备');
+  (1, 'EQ-EX-01', '挤出机-01', 1, 1, 'enabled', '模拟设备'),
+  (2, 'EQ-HO-01', '牵引机-01', 2, 1, 'enabled', '模拟设备');
 
 -- ---------- C. 质量指标、限值、过程参数、温区 ----------
 INSERT INTO quality_metric (id, code, name, unit, decimal_scale, metric_role, derived_expr, check_direction_hint, sort_no) VALUES
@@ -67,26 +67,26 @@ INSERT INTO quality_metric (id, code, name, unit, decimal_scale, metric_role, de
   (5, 'min_outer_diameter', '最小外径', 'mm', 3, 'raw', NULL, NULL, 5),
   (6, 'ovality', '不圆度', 'mm', 3, 'derived', 'max_outer_diameter - min_outer_diameter', '先核对同一样管同一截面的最大/最小外径和测量口径，再核查定径、冷却、支撑与牵引。', 6);
 
--- 演示限值：limit_type=demo，原型明确"演示限值不代表国标要求，不作合格判定"
+-- 待标定限值：limit_type=demo 表示尚未标注标准来源，不能作为合格判定依据
 INSERT INTO metric_spec_limit (spec_id, metric_id, lower_limit, upper_limit, limit_type, calibration_status, remark) VALUES
-  (1, 1, 25.000, 25.500, 'demo', 'demo', '演示限值，正式标准与产品限值待确认'),
-  (1, 2, 4.200, 4.800, 'demo', 'demo', '演示限值，正式标准与产品限值待确认'),
-  (1, 6, 0.000, 0.350, 'demo', 'demo', '演示限值，正式标准与产品限值待确认');
+  (1, 1, 25.000, 25.500, 'demo', 'demo', '限值待质量部门按产品标准与客户要求确认'),
+  (1, 2, 4.200, 4.800, 'demo', 'demo', '限值待质量部门按产品标准与客户要求确认'),
+  (1, 6, 0.000, 0.350, 'demo', 'demo', '限值待质量部门按产品标准与客户要求确认');
 
 INSERT INTO process_parameter (id, code, name, unit, decimal_scale, sort_no) VALUES
   (1, 'temperature', '温度', '°C', 1, 1),
   (2, 'pressure', '压力', 'MPa', 2, 2),
   (3, 'haul_off_speed', '牵引速度', 'm/min', 2, 3);
 
--- 指标与影响因素关联 [原型 metrics.influences]
+-- 指标与影响因素关联 [对应 metrics.influences]
 INSERT INTO metric_influence (metric_id, parameter_id, remark) VALUES
-  (1, 1, '演示关联，未验证因果'),
-  (1, 2, '演示关联，未验证因果'),
-  (2, 1, '演示关联，未验证因果'),
-  (2, 3, '演示关联，未验证因果'),
-  (6, 1, '演示关联，未验证因果'),
-  (6, 2, '演示关联，未验证因果'),
-  (6, 3, '演示关联，未验证因果');
+  (1, 1, '影响机理待现场数据验证'),
+  (1, 2, '影响机理待现场数据验证'),
+  (2, 1, '影响机理待现场数据验证'),
+  (2, 3, '影响机理待现场数据验证'),
+  (6, 1, '影响机理待现场数据验证'),
+  (6, 2, '影响机理待现场数据验证'),
+  (6, 3, '影响机理待现场数据验证');
 
 INSERT INTO temp_zone (id, code, name, equipment_id, default_setpoint_c, sort_no) VALUES
   (1, 'M1-barrel-1', 'M1 机筒1区', 1, 188.00, 1),
@@ -107,12 +107,12 @@ INSERT INTO production_batch (id, batch_no, spec_id, line_id, extruder_id, haul_
 
 -- 产品数据：批次号 + 生产日期唯一（一个产品只有一份）
 INSERT INTO product_data (id, code, batch_id, production_date, data_source_id, remark) VALUES
-  (1, 'PRD-001', 2, '2026-10-09', 2, '原型 Mock 产品数据'),
-  (2, 'PRD-002', 2, '2026-10-10', 2, '原型 Mock 产品数据'),
-  (3, 'PRD-003', 3, '2026-10-09', 2, '原型 Mock 产品数据'),
-  (4, 'PRD-004', 3, '2026-10-10', 2, '原型 Mock 产品数据'),
-  (5, 'PRD-005', 4, '2026-10-09', 2, '原型 Mock 产品数据'),
-  (6, 'PRD-006', 4, '2026-10-10', 2, '原型 Mock 产品数据');
+  (1, 'PRD-001', 2, '2026-10-09', 2, '早期方案 模拟 产品数据'),
+  (2, 'PRD-002', 2, '2026-10-10', 2, '早期方案 模拟 产品数据'),
+  (3, 'PRD-003', 3, '2026-10-09', 2, '早期方案 模拟 产品数据'),
+  (4, 'PRD-004', 3, '2026-10-10', 2, '早期方案 模拟 产品数据'),
+  (5, 'PRD-005', 4, '2026-10-09', 2, '早期方案 模拟 产品数据'),
+  (6, 'PRD-006', 4, '2026-10-10', 2, '早期方案 模拟 产品数据');
 
 INSERT INTO product_data_value (product_data_id, metric_id, metric_value, is_derived) VALUES
   (1, 1, 25.2350, 0),
@@ -475,7 +475,7 @@ INSERT INTO equipment_reading_value (reading_id, parameter_id, parameter_value) 
   (131, 2, 8.40),
   (132, 3, 12.88);
 
--- 工艺记录（原型 scenarios[].process；四个演示场景内容一致，此处只写一份）
+-- 工艺记录（每条记录对应一次生产运行，各场景的参数字段结构一致）
 INSERT INTO process_record (id, code, batch_id, equipment_id, record_time, data_source_id, time_match_status, haul_off_feedback_mpm, pipe_line_speed_mpm, mass_output_kgh, measured_unit_weight_kgpm, production_group) VALUES
   (1, 'PR-001', 4, 1, '2026-10-09 08:00:00', 6, 'pending', 12.62, 12.70, 186.00, 0.2600, 'D组'),
   (2, 'PR-002', 4, 1, '2026-10-09 11:20:00', 6, 'pending', 12.63, 12.70, 186.00, 0.2600, 'D组'),
@@ -543,7 +543,7 @@ INSERT INTO process_zone_value (process_record_id, zone_id, setpoint_c, feedback
   (7, 7, 206.00, 206.85),
   (7, 8, 207.00, 207.65);
 
--- ---------- F. 样管抽检记录（原型 normalRecords 基线：3 批次 × 7 时间） ----------
+-- ---------- F. 样管抽检记录（早期方案 normalRecords 基线：3 批次 × 7 时间） ----------
 INSERT INTO inspection_record (id, code, sample_no, batch_id, spec_id, production_group, inspect_time, measurement_stage, inspection_method, instrument_info, quality_flag, simulated_ovality, data_source_id, record_status) VALUES
   (1, 'IR-001', 'S-IR-001', 2, 1, 'C组', '2026-10-09 08:00:00', 'unconfirmed', '待确认', '待确认', 'none', 0, 5, 'valid'),
   (2, 'IR-002', 'S-IR-002', 2, 1, 'C组', '2026-10-09 11:20:00', 'unconfirmed', '待确认', '待确认', 'none', 0, 5, 'valid'),
@@ -633,13 +633,13 @@ INSERT INTO inspection_value (record_id, metric_id, metric_value, is_derived, is
   (21, 2, 4.3100, 0, 1),
   (21, 3, 4.4200, 0, 1);
 
--- ---------- 预警规则 R1–R5（顺序判断；阈值均为演示策略，待现场验证） ----------
+-- ---------- 预警规则 R1–R5（顺序判断；阈值均为未标定阈值，待现场验证） ----------
 INSERT INTO alert_rule (id, code, name, risk_type, evaluate_order, rule_category, metric_id, params_json, calibration_status, is_terminal, description) VALUES
   (1, 'R1', '数据记录差异待核对', 'error', 1, 'data_consistency', null, CAST('{"tolerance_mm":0.05,"match_window_minutes":30}' AS JSON), 'demo', 0, '两条来源记录差值超过容差：先核对样管编号与原始记录，不作产品不合格结论'),
   (2, 'R2', '原始测量数据错误 / 样管规格匹配待核对', 'error', 2, 'data_validity', null, CAST('{}' AS JSON), 'demo', 0, '最大外径小于最小外径、缺少同截面测点，或记录与当前规格差异明显时触发'),
-  (3, 'R3', '演示限值对照（待确认）', 'medium', 3, 'spec_limit', null, CAST('{}' AS JSON), 'demo', 0, '对照 metric_spec_limit；limit_type=demo 时不构成合格判定'),
+  (3, 'R3', '规格限值对照（限值待确认）', 'medium', 3, 'spec_limit', null, CAST('{}' AS JSON), 'demo', 0, '对照 metric_spec_limit；limit_type=demo 时不构成合格判定'),
   (4, 'R4', '待复核趋势', 'medium', 4, 'trend', null, CAST('{"consecutive":3,"minimum_change_mm":0.015,"maximum_gap_minutes":240}' AS JSON), 'demo', 0, '连续同向变化达阈值：需人工复核运行连续性，停机/换规格状态由 production_event 提供'),
-  (5, 'R5', '未发现演示框架触发项', 'normal', 5, 'fallback', null, CAST('{}' AS JSON), 'demo', 1, '兜底规则：未触发任何项，不代表产品已完成正式判定');
+  (5, 'R5', '未命中预警规则', 'normal', 5, 'fallback', null, CAST('{}' AS JSON), 'demo', 1, '兜底规则：未触发任何项，不代表产品已完成正式判定');
 
 COMMIT;
 
@@ -655,9 +655,9 @@ COMMIT;
 -- SELECT batch_no, data_source_name, outer_diameter_mm, min_wall_thickness_mm, ovality_effective_mm FROM v_inspection_record_wide LIMIT 5;
 
 -- =====================================================================
--- 可选演示异常：默认不启用。取消注释后执行，可在新系统中复现
--- 原型场景 A（R4 待复核趋势）与场景 C（R1 QMS/MES 差异）。
--- 注意：这会改写基线数据，仅用于演示环境。
+-- 可选异常样本：默认不启用。取消注释后执行，可在联调环境复现
+-- 早期方案场景 A（R4 待复核趋势）与场景 C（R1 QMS/MES 差异）。
+-- 注意：这会改写基线数据，仅用于联调环境。
 -- =====================================================================
 -- 场景 A：批次 12121D0032 最近三个点最小壁厚连续下降 4.29 → 4.27 → 4.26
 -- UPDATE inspection_value v JOIN inspection_record r ON r.id = v.record_id

@@ -1,0 +1,16 @@
+# pnpm 工作区配置
+#
+# 本项目是单一包（非 monorepo），此文件只用于声明依赖构建脚本的白名单。
+# pnpm 10 起默认不执行依赖的 install / postinstall 脚本，未在白名单内的包
+# 会被静默跳过并提示 ERR_PNPM_IGNORED_BUILDS。这里显式声明每个包的处理方式：
+#
+#   esbuild —— tsx 的打包器依赖。tsx 自带预编译二进制，esbuild 的 postinstall
+#              只是校验/下载对应平台的二进制；跳过不影响 tsx 运行，
+#              因此在 CI 与生产环境关闭，减少构建期的网络依赖。
+#   sharp   —— 仅 next/image 需要。本项目 images.unoptimized = true，
+#              不使用图片优化管线，因此关闭。
+#
+# 如需在本地为 next/image 开启图片优化，把 sharp 改为 true 并重新安装依赖。
+allowBuilds:
+  esbuild: false
+  sharp: false

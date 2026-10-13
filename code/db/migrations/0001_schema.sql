@@ -64,7 +64,7 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- A. 用户、角色与基础字典
 -- =====================================================================
 
--- 系统用户：原型中的"质量工程师 / 生产领班 / 设备工程师"等收件与确认角色
+-- 系统用户："质量工程师 / 生产领班 / 设备工程师"等收件与确认角色
 CREATE TABLE sys_user (
   id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   username            VARCHAR(64)     NOT NULL                COMMENT '登录名',
@@ -109,16 +109,16 @@ CREATE TABLE sys_user_role (
   CONSTRAINT fk_sys_user_role_role FOREIGN KEY (role_id) REFERENCES sys_role (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='用户角色关联';
 
--- 数据来源字典 [原型] 批次/产品/采集/抽检记录的 dataSource：
---   演示录入 / MES模拟 / QMS模拟
+-- 数据来源字典：批次 / 产品 / 采集 / 抽检记录的 dataSource 取值来源：
+--   生产录入 / MES 系统 / QMS 系统 / 设备数采 / 抽检台账 / 工艺记录
 -- is_simulated 用于把"模拟数据"与将来接入的生产数据严格区分开，
--- 避免把 Mock Data 当作正式生产能力（原型 AGENTS.md 明确要求）
+-- 联调期写入的模拟来源必须与生产来源显式区分（早期方案 AGENTS.md 明确要求）
 CREATE TABLE data_source (
   id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   code         VARCHAR(64)     NOT NULL COMMENT '来源编码：manual_entry/mes/qms/device/import',
   name         VARCHAR(64)     NOT NULL COMMENT '来源名称',
   system_type  ENUM('manual','mes','qms','device','other') NOT NULL DEFAULT 'other' COMMENT '系统类型',
-  is_simulated TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '1=模拟/演示数据来源，非正式生产能力',
+  is_simulated TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '1=模拟来源（联调写入），0=生产来源',
   description  VARCHAR(255)    NULL,
   status       ENUM('enabled','disabled') NOT NULL DEFAULT 'enabled',
   sort_no      INT             NOT NULL DEFAULT 0,
@@ -128,8 +128,8 @@ CREATE TABLE data_source (
   UNIQUE KEY uk_data_source_code (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='数据来源字典';
 
--- 产线/工段 [扩展] 原型中设备行只有一个文本 lineName（如"演示线 A"），
--- 正式库独立成表，用于"同产线可比性"判断（原型多次提示产线未映射）
+-- 产线/工段 [扩展] 设备行只有一个文本 lineName（只能填文本，无法保证拼写一致），
+-- 正式库独立成表，用于"同产线可比性"判断（早期方案多次提示产线未映射）
 CREATE TABLE production_line (
   id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   code        VARCHAR(64)     NOT NULL COMMENT '产线编码',
@@ -146,10 +146,10 @@ CREATE TABLE production_line (
 
 
 -- =====================================================================
--- B. 产品与设备主数据（原型"系统管理"分组）
+-- B. 产品与设备主数据（早期方案"系统管理"分组）
 -- =====================================================================
 
--- 产品类别 [原型] categories：id/name/description
+-- 产品类别 [对应 ] categories：id/name/description
 CREATE TABLE product_category (
   id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   code        VARCHAR(64)     NOT NULL COMMENT '类别编码，如 CAT-PPR',
@@ -165,15 +165,15 @@ CREATE TABLE product_category (
   KEY idx_product_category_deleted (is_deleted)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='产品类别';
 
--- 产品规格 [原型] specs：id/name/categoryId/outerDiameter/wallThickness/ovalityMax/status
+-- 产品规格 [对应 ] specs：id/name/categoryId/outerDiameter/wallThickness/ovalityMax/status
 CREATE TABLE product_spec (
   id                         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   code                       VARCHAR(64)     NOT NULL COMMENT '规格编码，如 SPEC-25-42',
   name                       VARCHAR(64)     NOT NULL COMMENT '规格名称，如 25×4.2',
   category_id                BIGINT UNSIGNED NOT NULL COMMENT '所属产品类别',
-  nominal_outer_diameter_mm  DECIMAL(10,3)   NOT NULL COMMENT '公称外径 mm [原型 outerDiameter]',
-  nominal_wall_thickness_mm  DECIMAL(10,3)   NOT NULL COMMENT '公称壁厚 mm [原型 wallThickness]',
-  ovality_max_mm             DECIMAL(10,3)   NULL     COMMENT '不圆度上限 mm [原型 ovalityMax]',
+  nominal_outer_diameter_mm  DECIMAL(10,3)   NOT NULL COMMENT '公称外径 mm [对应 outerDiameter]',
+  nominal_wall_thickness_mm  DECIMAL(10,3)   NOT NULL COMMENT '公称壁厚 mm [对应 wallThickness]',
+  ovality_max_mm             DECIMAL(10,3)   NULL     COMMENT '不圆度上限 mm [对应 ovalityMax]',
   status                     ENUM('enabled','disabled') NOT NULL DEFAULT 'enabled',
   is_deleted                 TINYINT(1)      NOT NULL DEFAULT 0,
   created_by                 BIGINT UNSIGNED NULL,
@@ -185,7 +185,7 @@ CREATE TABLE product_spec (
   CONSTRAINT fk_product_spec_category FOREIGN KEY (category_id) REFERENCES product_category (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='产品规格';
 
--- 设备类型 [原型] equipmentTypes：id/name/description
+-- 设备类型 [对应 ] equipmentTypes：id/name/description
 CREATE TABLE equipment_type (
   id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   code        VARCHAR(64)     NOT NULL COMMENT '类型编码，如 ETYPE-EXTRUDER / ETYPE-HAULOFF',
@@ -198,13 +198,13 @@ CREATE TABLE equipment_type (
   UNIQUE KEY uk_equipment_type_code (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='设备类型';
 
--- 设备台账 [原型] equipment：id/name/typeId/lineName/status
+-- 设备台账 [对应 ] equipment：id/name/typeId/lineName/status
 CREATE TABLE equipment (
   id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   code        VARCHAR(64)     NOT NULL COMMENT '设备编码，如 EQ-EX-01',
   name        VARCHAR(64)     NOT NULL COMMENT '设备名称',
   type_id     BIGINT UNSIGNED NOT NULL COMMENT '设备类型',
-  line_id     BIGINT UNSIGNED NULL     COMMENT '所属产线 [扩展：原型为文本 lineName]',
+  line_id     BIGINT UNSIGNED NULL     COMMENT '所属产线 [扩展：早期方案为文本 lineName]',
   status      ENUM('enabled','disabled') NOT NULL DEFAULT 'enabled',
   description VARCHAR(255)    NULL,
   is_deleted  TINYINT(1)      NOT NULL DEFAULT 0,
@@ -220,10 +220,10 @@ CREATE TABLE equipment (
 
 
 -- =====================================================================
--- C. 质量指标与过程参数字典（原型"质量指标与影响因素"）
+-- C. 质量指标与过程参数字典（早期方案"质量指标与影响因素"）
 -- =====================================================================
 
--- 质量指标字典 [原型] metrics + metricMeta
+-- 质量指标字典 [对应 ] metrics + metricMeta
 -- metric_role 区分：primary 参与判定（外径/最小壁厚/不圆度）；
 --                  raw 原始测量项（最大/最小外径、最大壁厚）；
 --                  derived 计算指标（不圆度 = 最大外径 − 最小外径）
@@ -231,11 +231,11 @@ CREATE TABLE quality_metric (
   id                   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   code                 VARCHAR(64)     NOT NULL COMMENT '指标编码：outer_diameter/min_wall_thickness/max_wall_thickness/max_outer_diameter/min_outer_diameter/ovality',
   name                 VARCHAR(64)     NOT NULL COMMENT '指标名称',
-  unit                 VARCHAR(16)     NOT NULL DEFAULT 'mm' COMMENT '单位 [原型 metricMeta.unit]',
-  decimal_scale        TINYINT UNSIGNED NOT NULL DEFAULT 3 COMMENT '展示小数位 [原型 fmt(n,3)/(n,2)]',
+  unit                 VARCHAR(16)     NOT NULL DEFAULT 'mm' COMMENT '单位 [对应 metricMeta.unit]',
+  decimal_scale        TINYINT UNSIGNED NOT NULL DEFAULT 3 COMMENT '展示小数位 [对应 fmt(n,3)/(n,2)]',
   metric_role          ENUM('primary','raw','derived') NOT NULL DEFAULT 'primary' COMMENT '指标角色',
   derived_expr         VARCHAR(255)    NULL     COMMENT '计算表达式（仅 derived，由后端计算，不在 SQL 内动态求值），如 max_outer_diameter - min_outer_diameter',
-  check_direction_hint VARCHAR(500)    NULL     COMMENT '核查方向提示 [原型 metricCheckDirection]',
+  check_direction_hint VARCHAR(500)    NULL     COMMENT '核查方向提示 [对应 metricCheckDirection]',
   status               ENUM('enabled','disabled') NOT NULL DEFAULT 'enabled',
   sort_no              INT             NOT NULL DEFAULT 0,
   is_deleted           TINYINT(1)      NOT NULL DEFAULT 0,
@@ -245,19 +245,19 @@ CREATE TABLE quality_metric (
   UNIQUE KEY uk_quality_metric_code (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='质量指标字典';
 
--- 指标 × 规格限值 [原型] metrics.specIds + lowerLimit/upperLimit
--- 归一化说明：原型把"适用规格列表"和"上下限"放在同一指标行上，正式库
+-- 指标 × 规格限值 [对应 ] metrics.specIds + lowerLimit/upperLimit
+-- 归一化说明：早期方案把"适用规格列表"和"上下限"放在同一指标行上，正式库
 -- 拆为（规格, 指标）维度的限值表，同一指标在不同规格可有不同限值。
--- limit_type/calibration_status 用于区分"演示限值"与正式标准，
--- 原型反复强调演示限值不构成合格判定（不得写成已验证能力）。
+-- limit_type/calibration_status 用于区分"模拟限值"与正式标准，
+-- 早期方案反复强调模拟限值不构成合格判定（不得写成已验证能力）。
 CREATE TABLE metric_spec_limit (
   id                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   spec_id            BIGINT UNSIGNED NOT NULL COMMENT '产品规格',
   metric_id          BIGINT UNSIGNED NOT NULL COMMENT '质量指标',
   lower_limit        DECIMAL(12,4)   NULL     COMMENT '下限，NULL=不设下限',
   upper_limit        DECIMAL(12,4)   NULL     COMMENT '上限，NULL=不设上限',
-  limit_type         ENUM('demo','internal','customer','national') NOT NULL DEFAULT 'demo' COMMENT '限值类型：demo 演示限值',
-  calibration_status ENUM('demo','pending_field_validation','validated') NOT NULL DEFAULT 'demo' COMMENT '限值可信状态：演示策略待现场验证',
+  limit_type         ENUM('demo','internal','customer','national') NOT NULL DEFAULT 'demo' COMMENT '限值类型：demo 模拟限值',
+  calibration_status ENUM('demo','pending_field_validation','validated') NOT NULL DEFAULT 'demo' COMMENT '限值可信状态：未标定阈值待现场验证',
   standard_ref       VARCHAR(128)    NULL     COMMENT '适用标准/条款（待确认）',
   effective_from     DATE            NULL     COMMENT '生效日期',
   effective_to       DATE            NULL     COMMENT '失效日期',
@@ -271,13 +271,13 @@ CREATE TABLE metric_spec_limit (
   CONSTRAINT fk_metric_spec_limit_metric FOREIGN KEY (metric_id) REFERENCES quality_metric (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='指标规格限值';
 
--- 过程参数字典 [原型] processFactorLabels / factorMeta：温度/压力/牵引速度
+-- 过程参数字典 [对应 ] processFactorLabels / factorMeta：温度/压力/牵引速度
 CREATE TABLE process_parameter (
   id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   code          VARCHAR(64)     NOT NULL COMMENT '参数编码：temperature/pressure/haul_off_speed',
   name          VARCHAR(64)     NOT NULL COMMENT '参数名称',
   unit          VARCHAR(16)     NOT NULL COMMENT '单位：°C/MPa/m/min',
-  decimal_scale TINYINT UNSIGNED NOT NULL DEFAULT 2 COMMENT '展示小数位 [原型 factorMeta.digits]',
+  decimal_scale TINYINT UNSIGNED NOT NULL DEFAULT 2 COMMENT '展示小数位 [对应 factorMeta.digits]',
   description   VARCHAR(255)    NULL,
   status        ENUM('enabled','disabled') NOT NULL DEFAULT 'enabled',
   sort_no       INT             NOT NULL DEFAULT 0,
@@ -287,7 +287,7 @@ CREATE TABLE process_parameter (
   UNIQUE KEY uk_process_parameter_code (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='过程参数（影响因素）字典';
 
--- 指标 × 过程参数 [原型] metrics.influences（multi 选择）
+-- 指标 × 过程参数 [对应 ] metrics.influences（multi 选择）
 CREATE TABLE metric_influence (
   metric_id    BIGINT UNSIGNED NOT NULL COMMENT '质量指标',
   parameter_id BIGINT UNSIGNED NOT NULL COMMENT '关联过程参数',
@@ -299,14 +299,14 @@ CREATE TABLE metric_influence (
   CONSTRAINT fk_metric_influence_parameter FOREIGN KEY (parameter_id) REFERENCES process_parameter (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='指标与过程参数关联';
 
--- 温区字典 [原型] zoneDefinitions：M1 机筒 1–4 区、M1 适配器 1–4 区
--- 说明：设定值/反馈值按温区独立展示，不计算总平均（原型明确规则）
+-- 温区字典 [对应 ] zoneDefinitions：M1 机筒 1–4 区、M1 适配器 1–4 区
+-- 说明：设定值/反馈值按温区独立展示，不计算总平均（要求规则）
 CREATE TABLE temp_zone (
   id                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   code               VARCHAR(64)     NOT NULL COMMENT '温区编码，如 M1-barrel-1',
   name               VARCHAR(64)     NOT NULL COMMENT '温区名称，如 M1 机筒1区',
   equipment_id       BIGINT UNSIGNED NULL     COMMENT '所属设备',
-  default_setpoint_c DECIMAL(8,2)    NULL     COMMENT '默认设定温度 °C [原型 zoneDefinitions.setpoint]',
+  default_setpoint_c DECIMAL(8,2)    NULL     COMMENT '默认设定温度 °C [对应 zoneDefinitions.setpoint]',
   sort_no            INT             NOT NULL DEFAULT 0,
   description        VARCHAR(255)    NULL,
   is_deleted         TINYINT(1)      NOT NULL DEFAULT 0,
@@ -320,22 +320,22 @@ CREATE TABLE temp_zone (
 
 
 -- =====================================================================
--- D. 生产批次、产品数据与设备采集数据（原型"数据源管理"）
+-- D. 生产批次、产品数据与设备采集数据（早期方案"数据源管理"）
 -- =====================================================================
 
--- 生产批次 [原型] batches：id/specId/extruderId/haulOffId/productionGroup/startTime/source
+-- 生产批次 [对应 ] batches：id/specId/extruderId/haulOffId/productionGroup/startTime/source
 CREATE TABLE production_batch (
   id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  batch_no         VARCHAR(64)     NOT NULL COMMENT '批次号，如 12121D0032 [原型 id]，来自 MES 的自然键',
+  batch_no         VARCHAR(64)     NOT NULL COMMENT '批次号，如 12121D0032 [对应 id]，来自 MES 的自然键',
   spec_id          BIGINT UNSIGNED NOT NULL COMMENT '产品规格',
   line_id          BIGINT UNSIGNED NULL     COMMENT '生产产线 [扩展]',
-  extruder_id      BIGINT UNSIGNED NULL     COMMENT '挤出设备 [原型 extruderId]',
-  haul_off_id      BIGINT UNSIGNED NULL     COMMENT '牵引设备 [原型 haulOffId]',
-  production_group VARCHAR(32)     NULL     COMMENT '生产组别，如 D组 [原型 productionGroup]',
-  start_time       DATETIME        NOT NULL COMMENT '生产开始时间 [原型 startTime]',
+  extruder_id      BIGINT UNSIGNED NULL     COMMENT '挤出设备 [对应 extruderId]',
+  haul_off_id      BIGINT UNSIGNED NULL     COMMENT '牵引设备 [对应 haulOffId]',
+  production_group VARCHAR(32)     NULL     COMMENT '生产组别，如 D组 [对应 productionGroup]',
+  start_time       DATETIME        NOT NULL COMMENT '生产开始时间 [对应 startTime]',
   end_time         DATETIME        NULL     COMMENT '生产结束时间 [扩展]',
-  batch_status     ENUM('planned','in_progress','completed','cancelled') NOT NULL DEFAULT 'completed' COMMENT '批次状态 [扩展：原型缺运行连续性信息]',
-  data_source_id   BIGINT UNSIGNED NOT NULL COMMENT '数据来源 [原型 source]',
+  batch_status     ENUM('planned','in_progress','completed','cancelled') NOT NULL DEFAULT 'completed' COMMENT '批次状态 [扩展：早期方案缺运行连续性信息]',
+  data_source_id   BIGINT UNSIGNED NOT NULL COMMENT '数据来源 [对应 source]',
   remark           VARCHAR(255)    NULL,
   is_deleted       TINYINT(1)      NOT NULL DEFAULT 0,
   created_by       BIGINT UNSIGNED NULL,
@@ -354,7 +354,7 @@ CREATE TABLE production_batch (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='生产批次基础信息';
 
 -- 生产事件 [扩展]（停机/换规格/调机）
--- 原型的 R4 趋势规则反复提示"停机、换规格或运行连续性记录未提供"，
+-- 早期方案的 R4 趋势规则反复提示"停机、换规格或运行连续性记录未提供"，
 -- 本表用于正式系统补齐该缺口，支撑"运行连续性"判断
 CREATE TABLE production_event (
   id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -376,16 +376,16 @@ CREATE TABLE production_event (
   CONSTRAINT fk_production_event_operator FOREIGN KEY (operator_user_id) REFERENCES sys_user (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='生产事件（停机/换规格/调机）';
 
--- 产品数据 [原型] products：id/batchId/productionDate/指标值/dataSource
--- 唯一键 (batch_id, production_date) 对应原型规则"一个产品只有一份"
+-- 产品数据 [对应 ] products：id/batchId/productionDate/指标值/dataSource
+-- 唯一键 (batch_id, production_date) 对应早期方案规则"一个产品只有一份"
 CREATE TABLE product_data (
   id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  code           VARCHAR(64)     NOT NULL COMMENT '产品数据编号，如 PRD-001 [原型 id]',
+  code           VARCHAR(64)     NOT NULL COMMENT '产品数据编号，如 PRD-001 [对应 id]',
   batch_id       BIGINT UNSIGNED NOT NULL COMMENT '批次号',
-  production_date DATE           NOT NULL COMMENT '生产日期 [原型 productionDate]',
-  data_source_id BIGINT UNSIGNED NOT NULL COMMENT '数据来源 [原型 dataSource]',
+  production_date DATE           NOT NULL COMMENT '生产日期 [对应 productionDate]',
+  data_source_id BIGINT UNSIGNED NOT NULL COMMENT '数据来源 [对应 dataSource]',
   remark         VARCHAR(255)    NULL     COMMENT '备注',
-  migrated_from  VARCHAR(64)     NULL     COMMENT '迁移来源记录号（原型 migrateAdminRecords 的 migratedFrom）',
+  migrated_from  VARCHAR(64)     NULL     COMMENT '迁移来源记录号（早期方案 migrateAdminRecords 的 migratedFrom）',
   created_by     BIGINT UNSIGNED NULL,
   created_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -397,7 +397,7 @@ CREATE TABLE product_data (
   CONSTRAINT fk_product_data_source FOREIGN KEY (data_source_id) REFERENCES data_source (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='产品数据（批次 + 生产日期唯一）';
 
--- 产品指标值 [原型] products 的 outerDiameter/minWallThickness/maxWallThickness/ovality 列
+-- 产品指标值 [对应 ] products 的 outerDiameter/minWallThickness/maxWallThickness/ovality 列
 CREATE TABLE product_data_value (
   id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   product_data_id BIGINT UNSIGNED NOT NULL COMMENT '产品数据',
@@ -414,15 +414,15 @@ CREATE TABLE product_data_value (
   CONSTRAINT fk_product_data_value_metric FOREIGN KEY (metric_id) REFERENCES quality_metric (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='产品指标值';
 
--- 设备采集数据 [原型] deviceReadings：id/batchId/productionDate/equipmentId/collectTime/参数值/dataSource
+-- 设备采集数据 [对应 ] deviceReadings：id/batchId/productionDate/equipmentId/collectTime/参数值/dataSource
 -- 唯一键 (batch_id, production_date, equipment_id, collect_time)：对应"设备编号 + 生产日期 + 采集时间唯一，每小时 1 条"
 CREATE TABLE equipment_reading (
   id                    BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  code                  VARCHAR(64)     NOT NULL COMMENT '记录编号，如 DEV-EX-... [原型 id]',
+  code                  VARCHAR(64)     NOT NULL COMMENT '记录编号，如 DEV-EX-... [对应 id]',
   batch_id              BIGINT UNSIGNED NOT NULL COMMENT '批次号',
   production_date       DATE            NOT NULL COMMENT '生产日期',
   equipment_id          BIGINT UNSIGNED NOT NULL COMMENT '设备编号',
-  collect_time          TIME            NOT NULL COMMENT '采集时间（时:分）[原型 collectTime]',
+  collect_time          TIME            NOT NULL COMMENT '采集时间（时:分）[对应 collectTime]',
   collected_at          DATETIME        NULL     COMMENT '采集时间戳（生产日期 + 采集时间，应用层写入）',
   data_source_id        BIGINT UNSIGNED NOT NULL COMMENT '数据来源',
   remark                VARCHAR(255)    NULL,
@@ -439,9 +439,9 @@ CREATE TABLE equipment_reading (
   CONSTRAINT fk_equipment_reading_source FOREIGN KEY (data_source_id) REFERENCES data_source (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='设备采集数据表头';
 
--- 设备采集参数值 [原型] deviceReadings 的 temperature/pressure/haulOffSpeed 列
+-- 设备采集参数值 [对应 ] deviceReadings 的 temperature/pressure/haulOffSpeed 列
 -- 长表原因：过程参数是可扩展字典（metric_influence 引用同一字典），
--- 新增参数不需要 ALTER TABLE；NULL 值不再占位（原型中挤出机行的 haulOffSpeed 为 null）
+-- 新增参数不需要 ALTER TABLE；NULL 值不再占位（挤出机行的 haulOffSpeed 为 null）
 CREATE TABLE equipment_reading_value (
   id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   reading_id     BIGINT UNSIGNED NOT NULL COMMENT '采集记录表头',
@@ -456,20 +456,20 @@ CREATE TABLE equipment_reading_value (
   CONSTRAINT fk_equipment_reading_value_parameter FOREIGN KEY (parameter_id) REFERENCES process_parameter (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='设备采集参数值';
 
--- 工艺过程记录 [原型] scenarios[].process：虚拟工艺数据
--- 注意：原型中"牵引反馈速度 haulOffFeedback"与"演示管材线速度 pipeLineSpeedMpm"
+-- 工艺过程记录 [对应 ] scenarios[].process：虚拟工艺数据
+-- 注意："牵引反馈速度 haulOffFeedback"与"模拟管材线速度 pipeLineSpeedMpm"
 -- 是两个独立量（后者不是牵引反馈），本表分别存列，不做换算
 CREATE TABLE process_record (
   id                         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  code                       VARCHAR(64)     NOT NULL COMMENT '工艺记录编号，如 PR-A-0 [原型 id]',
+  code                       VARCHAR(64)     NOT NULL COMMENT '工艺记录编号，如 PR-A-0 [对应 id]',
   batch_id                   BIGINT UNSIGNED NOT NULL COMMENT '批次号',
   equipment_id               BIGINT UNSIGNED NULL     COMMENT '对应设备',
-  record_time                DATETIME        NOT NULL COMMENT '记录时间 [原型 timestamp]',
+  record_time                DATETIME        NOT NULL COMMENT '记录时间 [对应 timestamp]',
   data_source_id             BIGINT UNSIGNED NULL     COMMENT '数据来源',
-  time_match_status          ENUM('confirmed','pending','mismatch') NOT NULL DEFAULT 'pending' COMMENT '时间匹配状态 [原型 timeMatchStatus：时间匹配待确认]',
+  time_match_status          ENUM('confirmed','pending','mismatch') NOT NULL DEFAULT 'pending' COMMENT '时间匹配状态 [对应 timeMatchStatus：时间匹配待确认]',
   haul_off_feedback_mpm      DECIMAL(8,2)    NULL     COMMENT '牵引反馈速度 m/min（语义待确认）',
   pipe_line_speed_mpm        DECIMAL(8,2)    NULL     COMMENT '管材线速度 m/min（独立虚拟量，非牵引反馈）',
-  mass_output_kgh            DECIMAL(10,2)   NULL     COMMENT '质量产出率 kg/h（演示量，不可换算长度）',
+  mass_output_kgh            DECIMAL(10,2)   NULL     COMMENT '质量产出率 kg/h（核算口径待确认，不可直接换算长度）',
   measured_unit_weight_kgpm  DECIMAL(10,4)   NULL     COMMENT '每米重量 kg/m（测量方式为实测，当前值为模拟）',
   production_group           VARCHAR(32)     NULL     COMMENT '生产组别',
   remark                     VARCHAR(255)    NULL,
@@ -484,15 +484,15 @@ CREATE TABLE process_record (
   CONSTRAINT fk_process_record_source FOREIGN KEY (data_source_id) REFERENCES data_source (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='工艺过程记录（温区/牵引/产出）';
 
--- 温区设定与反馈 [原型] process.zones[]：id/setpoint/feedback
--- 偏差列由生成列计算（反馈 − 设定），与原型展示口径一致
+-- 温区设定与反馈 [对应 ] process.zones[]：id/setpoint/feedback
+-- 偏差列由生成列计算（反馈 − 设定），与早期方案展示口径一致
 CREATE TABLE process_zone_value (
   id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   process_record_id BIGINT UNSIGNED NOT NULL COMMENT '工艺记录',
   zone_id           BIGINT UNSIGNED NOT NULL COMMENT '温区',
   setpoint_c        DECIMAL(8,2)    NULL     COMMENT '设定温度 °C',
   feedback_c        DECIMAL(8,2)    NULL     COMMENT '反馈温度 °C',
-  deviation_c       DECIMAL(8,2)    GENERATED ALWAYS AS (feedback_c - setpoint_c) STORED COMMENT '偏差 = 反馈 − 设定（原型展示口径）',
+  deviation_c       DECIMAL(8,2)    GENERATED ALWAYS AS (feedback_c - setpoint_c) STORED COMMENT '偏差 = 反馈 − 设定（早期方案展示口径）',
   created_at        DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at        DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -504,15 +504,15 @@ CREATE TABLE process_zone_value (
 
 
 -- =====================================================================
--- E. Excel 批量导入（原型"下载整套模板 / 校验后整批写入"）
+-- E. Excel 批量导入（早期方案"下载整套模板 / 校验后整批写入"）
 -- =====================================================================
 
--- 导入任务。原型规则：先整批校验，发现错误不写入任何数据 → 只有
+-- 导入任务。早期方案规则：先整批校验，发现错误不写入任何数据 → 只有
 -- status=validated 的任务才允许提交为 committed；error_summary 保留逐行错误明细
 CREATE TABLE import_job (
   id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   code           VARCHAR(64)     NOT NULL COMMENT '导入批次号',
-  group_key      ENUM('product_master','equipment','production_data') NOT NULL COMMENT '数据类别 [原型 adminImportGroups]',
+  group_key      ENUM('product_master','equipment','production_data') NOT NULL COMMENT '数据类别 [对应 adminImportGroups]',
   file_name      VARCHAR(255)    NOT NULL COMMENT '上传文件名',
   file_size_bytes BIGINT UNSIGNED NULL    COMMENT '文件大小',
   sheet_count    INT UNSIGNED    NULL     COMMENT '工作表数量',
@@ -533,30 +533,30 @@ CREATE TABLE import_job (
 
 
 -- =====================================================================
--- F. 抽检记录与质量预警（原型"质量监控与预警" + R1–R5）
+-- F. 抽检记录与质量预警（早期方案"质量监控与预警" + R1–R5）
 -- =====================================================================
 
--- 抽检记录（样管）[原型] record：
+-- 抽检记录（样管）[对应 ] record：
 --   id/sampleId/batchId/productSpec/timestamp/productionTime/inspectionTime/
 --   dataSource/dataValueType/inspectionMethod/instrumentInfo/measurementStage/
 --   inspectionStatus/productionGroup
--- 唯一键 (batch_id, inspect_time)：对应原型"批次 × 抽检时间"热力格每格一条
+-- 唯一键 (batch_id, inspect_time)：对应早期方案"批次 × 抽检时间"热力格每格一条
 CREATE TABLE inspection_record (
   id                      BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  code                    VARCHAR(64)     NOT NULL COMMENT '记录编号，如 IR-001 [原型 id]',
-  sample_no               VARCHAR(64)     NOT NULL COMMENT '样管编号，如 S-001 [原型 sampleId]（同一样管初测/复测可多条）',
+  code                    VARCHAR(64)     NOT NULL COMMENT '记录编号，如 IR-001 [对应 id]',
+  sample_no               VARCHAR(64)     NOT NULL COMMENT '样管编号，如 S-001 [对应 sampleId]（同一样管初测/复测可多条）',
   batch_id                BIGINT UNSIGNED NOT NULL COMMENT '批次号',
   spec_id                 BIGINT UNSIGNED NOT NULL COMMENT '产品规格',
   production_group        VARCHAR(32)     NULL     COMMENT '生产组别',
-  inspect_time            DATETIME        NOT NULL COMMENT '抽检/检测时间 [原型 timestamp / inspectionTime]',
-  production_time         DATETIME        NULL     COMMENT '生产时间（待补，用于计算检测延迟）[原型 productionTime]',
+  inspect_time            DATETIME        NOT NULL COMMENT '抽检/检测时间 [对应 timestamp / inspectionTime]',
+  production_time         DATETIME        NULL     COMMENT '生产时间（待补，用于计算检测延迟）[对应 productionTime]',
   inspection_delay_minutes INT UNSIGNED   NULL     COMMENT '检测延迟分钟（由生产时间与检测时间计算）',
-  measurement_stage       ENUM('initial','retest','unconfirmed') NOT NULL DEFAULT 'unconfirmed' COMMENT '初测/复测 [原型 measurementStage]',
-  inspection_method       VARCHAR(128)    NULL     COMMENT '检验方法 [原型 inspectionMethod：待确认]',
-  instrument_info         VARCHAR(128)    NULL     COMMENT '量具/仪器与校准信息 [原型 instrumentInfo：待确认]',
+  measurement_stage       ENUM('initial','retest','unconfirmed') NOT NULL DEFAULT 'unconfirmed' COMMENT '初测/复测 [对应 measurementStage]',
+  inspection_method       VARCHAR(128)    NULL     COMMENT '检验方法 [对应 inspectionMethod：待确认]',
+  instrument_info         VARCHAR(128)    NULL     COMMENT '量具/仪器与校准信息 [对应 instrumentInfo：待确认]',
   quality_flag            ENUM('none','qms_mes_mismatch','measurement_error','spec_mismatch','insufficient') NOT NULL DEFAULT 'none' COMMENT '数据质量标记：R1/R2 判定来源',
   quality_note            VARCHAR(500)    NULL     COMMENT '数据质量问题说明（不构成产品合格判定）',
-  simulated_ovality       TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '1=不圆度为显式模拟构造值 [原型 simulatedOvality]',
+  simulated_ovality       TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '1=不圆度为显式模拟构造值 [对应 simulatedOvality]',
   data_source_id          BIGINT UNSIGNED NOT NULL COMMENT '数据来源',
   record_status           ENUM('valid','void') NOT NULL DEFAULT 'valid' COMMENT '记录有效性（作废不物理删除）',
   remark                  VARCHAR(255)    NULL,
@@ -575,16 +575,16 @@ CREATE TABLE inspection_record (
   CONSTRAINT fk_inspection_record_creator FOREIGN KEY (created_by) REFERENCES sys_user (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='样管抽检记录';
 
--- 抽检指标值 [原型] record 的 outerDiameter/maxOuterDiameter/minOuterDiameter/
+-- 抽检指标值 [对应 ] record 的 outerDiameter/maxOuterDiameter/minOuterDiameter/
 --   minWallThickness/maxWallThickness/ovality 列
--- 关键规则：某指标缺失 = 不写行 → 接口层返回"无数据"（原型"缺失不圆度显示无数据"）
+-- 关键规则：某指标缺失 = 不写行 → 接口层返回"无数据"（早期方案"缺失不圆度显示无数据"）
 CREATE TABLE inspection_value (
   id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   record_id     BIGINT UNSIGNED NOT NULL COMMENT '抽检记录',
   metric_id     BIGINT UNSIGNED NOT NULL COMMENT '质量指标',
   metric_value  DECIMAL(12,4)   NOT NULL COMMENT '测量值（单位见指标字典）',
   is_derived    TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '1=计算值（不圆度 = 最大外径 − 最小外径）',
-  is_simulated  TINYINT(1)      NOT NULL DEFAULT 1 COMMENT '1=模拟值 [原型 dataValueType：模拟值]',
+  is_simulated  TINYINT(1)      NOT NULL DEFAULT 1 COMMENT '1=模拟值 [对应 dataValueType：模拟值]',
   remark        VARCHAR(255)    NULL,
   created_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -595,8 +595,8 @@ CREATE TABLE inspection_value (
   CONSTRAINT fk_inspection_value_metric FOREIGN KEY (metric_id) REFERENCES quality_metric (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='抽检指标值';
 
--- 多点壁厚原始测点 [原型] wallThicknessPoints（原型中恒为 null，此处预留给正式系统）
--- 用于区分"整体变薄"与"局部最薄处变化"（原型反复提示仅凭最小壁厚不能判定整体变薄）
+-- 多点壁厚原始测点 [对应 ] wallThicknessPoints（恒为 null，此处预留给正式系统）
+-- 用于区分"整体变薄"与"局部最薄处变化"（早期方案反复提示仅凭最小壁厚不能判定整体变薄）
 CREATE TABLE inspection_wall_point (
   id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   record_id     BIGINT UNSIGNED NOT NULL COMMENT '抽检记录',
@@ -610,7 +610,7 @@ CREATE TABLE inspection_wall_point (
   CONSTRAINT fk_inspection_wall_point_record FOREIGN KEY (record_id) REFERENCES inspection_record (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='多点壁厚原始测点';
 
--- QMS / MES 记录核对 [原型] record.qmsPair（场景 C）
+-- QMS / MES 记录核对 [对应 ] record.qmsPair（场景 C）
 -- diff_value 为生成列，容差与结论分列保存，便于追溯"当时用的容差"
 CREATE TABLE data_consistency_check (
   id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -620,9 +620,9 @@ CREATE TABLE data_consistency_check (
   secondary_value     DECIMAL(12,4)   NOT NULL COMMENT '待核对记录值（如 QMS 值）',
   primary_source_id   BIGINT UNSIGNED NULL     COMMENT '主记录来源',
   secondary_source_id BIGINT UNSIGNED NULL     COMMENT '待核对记录来源',
-  matched_time        DATETIME        NULL     COMMENT '两条记录的匹配时间 [原型 qmsPair.timestamp]',
+  matched_time        DATETIME        NULL     COMMENT '两条记录的匹配时间 [对应 qmsPair.timestamp]',
   diff_value          DECIMAL(12,4)   GENERATED ALWAYS AS (ABS(primary_value - secondary_value)) STORED COMMENT '差值绝对值（生成列）',
-  tolerance_value     DECIMAL(12,4)   NOT NULL COMMENT '当时的比对容差 [原型 qmsMes.toleranceMm]',
+  tolerance_value     DECIMAL(12,4)   NOT NULL COMMENT '当时的比对容差 [对应 qmsMes.toleranceMm]',
   result              ENUM('pending','consistent','inconsistent','insufficient') NOT NULL DEFAULT 'pending' COMMENT '核对结论',
   conclusion_note     VARCHAR(500)    NULL     COMMENT '核对说明（不得据此判断产品不合格）',
   checked_by          BIGINT UNSIGNED NULL     COMMENT '核对人',
@@ -639,9 +639,9 @@ CREATE TABLE data_consistency_check (
   CONSTRAINT fk_data_consistency_checker FOREIGN KEY (checked_by) REFERENCES sys_user (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='QMS/MES 数据一致性核对';
 
--- 预警规则 [原型] R1–R5 顺序判断 + DEMO_CONFIG 阈值常量
+-- 预警规则 [对应 ] R1–R5 顺序判断 + DEMO_CONFIG 阈值常量
 -- evaluate_order 即"顺序判断"顺序；params_json 保存可配置阈值；
--- calibration_status 明确阈值为演示策略、待现场验证
+-- calibration_status 明确阈值为未标定阈值、待现场验证
 CREATE TABLE alert_rule (
   id                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   code               VARCHAR(32)     NOT NULL COMMENT '规则编码：R1/R2/R3/R4/R5',
@@ -664,27 +664,27 @@ CREATE TABLE alert_rule (
   CONSTRAINT fk_alert_rule_metric FOREIGN KEY (metric_id) REFERENCES quality_metric (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='预警规则（R1–R5）';
 
--- 预警事件 [原型] buildEvents() 产出：eventId/recordId/batchId/timestamp/startTime/
+-- 预警事件 [对应 ] buildEvents() 产出：eventId/recordId/batchId/timestamp/startTime/
 --   metric/riskType/triggeredRule/reason/affectedLengthEstimate/emailStatus/handlingStatus
 -- 去重：同一批次 + 规则 + 指标 + 窗口起点只产生一条事件；
 --       窗口推进（window_start_time 变化）后允许再次产生事件
 CREATE TABLE alert_event (
   id                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  code               VARCHAR(64)     NOT NULL COMMENT '事件编号，如 QE-A-20261010-001 [原型 eventId]',
+  code               VARCHAR(64)     NOT NULL COMMENT '事件编号，如 QE-A-20261010-001 [对应 eventId]',
   rule_id            BIGINT UNSIGNED NOT NULL COMMENT '命中规则',
   rule_code          VARCHAR(32)     NOT NULL COMMENT '规则编码快照',
   rule_version       VARCHAR(32)     NULL     COMMENT '规则版本快照',
-  risk_type          ENUM('medium','high','error') NOT NULL COMMENT '风险类型（原型无 high 规则，保留以扩展）',
+  risk_type          ENUM('medium','high','error') NOT NULL COMMENT '风险类型（早期方案无 high 规则，保留以扩展）',
   batch_id           BIGINT UNSIGNED NOT NULL COMMENT '批次号',
   spec_id            BIGINT UNSIGNED NULL     COMMENT '产品规格',
   metric_id          BIGINT UNSIGNED NOT NULL COMMENT '异常指标',
-  trigger_record_id  BIGINT UNSIGNED NULL     COMMENT '触发记录 [原型 recordId]',
-  window_start_time  DATETIME        NULL     COMMENT '异常窗口起点 [原型 startTime]',
-  window_end_time    DATETIME        NOT NULL COMMENT '异常窗口终点/事件时间 [原型 timestamp]',
-  reason             VARCHAR(1000)   NOT NULL COMMENT '触发原因说明 [原型 reason]',
-  affected_length_m  DECIMAL(12,2)   NULL     COMMENT '影响长度演示估算 m [原型 affectedLengthEstimate]',
+  trigger_record_id  BIGINT UNSIGNED NULL     COMMENT '触发记录 [对应 recordId]',
+  window_start_time  DATETIME        NULL     COMMENT '异常窗口起点 [对应 startTime]',
+  window_end_time    DATETIME        NOT NULL COMMENT '异常窗口终点/事件时间 [对应 timestamp]',
+  reason             VARCHAR(1000)   NOT NULL COMMENT '触发原因说明 [对应 reason]',
+  affected_length_m  DECIMAL(12,2)   NULL     COMMENT '影响长度模拟估算 m [对应 affectedLengthEstimate]',
   line_speed_mpm     DECIMAL(8,2)    NULL     COMMENT '估算所用线速度 m/min（快照）',
-  handling_status    ENUM('pending','processing','verified','closed','ignored') NOT NULL DEFAULT 'pending' COMMENT '处理状态 [原型 handlingStatus]',
+  handling_status    ENUM('pending','processing','verified','closed','ignored') NOT NULL DEFAULT 'pending' COMMENT '处理状态 [对应 handlingStatus]',
   handler_user_id    BIGINT UNSIGNED NULL     COMMENT '处理人',
   handled_at         DATETIME        NULL     COMMENT '处理时间',
   handling_note      VARCHAR(500)    NULL     COMMENT '处理说明',
@@ -719,8 +719,8 @@ CREATE TABLE alert_event_record (
   CONSTRAINT fk_alert_event_record_record FOREIGN KEY (record_id) REFERENCES inspection_record (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='预警事件关联抽检记录';
 
--- 通知 [原型] showMail()：收件角色（质量工程师/生产领班）、主题、正文、状态
--- is_simulated 区分"演示发送"与真实邮件服务；中风险自动发送策略待业务确认
+-- 通知 [对应 ] showMail()：收件角色（质量工程师/生产领班）、主题、正文、状态
+-- is_simulated 区分"模拟发送"与真实邮件服务；中风险自动发送策略待业务确认
 CREATE TABLE notification (
   id            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   code          VARCHAR(64)     NOT NULL COMMENT '通知编号',
@@ -769,20 +769,20 @@ CREATE TABLE notification_recipient (
 
 
 -- =====================================================================
--- G. 异常诊断、结构化结论与工程师验证（原型"异常诊断与验证"）
+-- G. 异常诊断、结构化结论与工程师验证（早期方案"异常诊断与验证"）
 -- =====================================================================
 
--- 分析批次（一次"生成分析"）[原型] state.ai + state.hypotheses[scenario]
+-- 分析批次（一次"生成分析"）[对应 ] state.ai + state.hypotheses[scenario]
 -- 重新生成 = 新增 run_no，历史结论与工程师记录不被覆盖
 CREATE TABLE analysis_run (
   id                   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   code                 VARCHAR(64)     NOT NULL COMMENT '分析批次号',
   event_id             BIGINT UNSIGNED NOT NULL COMMENT '预警事件',
-  metric_id            BIGINT UNSIGNED NOT NULL COMMENT '分析指标 [原型 state.metric]',
-  reference_batch_id   BIGINT UNSIGNED NULL     COMMENT '参考批次 [原型 state.golden]',
-  factor_parameter_id  BIGINT UNSIGNED NULL     COMMENT '当前相关因素参数 [原型 currentFactor()]',
+  metric_id            BIGINT UNSIGNED NOT NULL COMMENT '分析指标 [对应 state.metric]',
+  reference_batch_id   BIGINT UNSIGNED NULL     COMMENT '参考批次 [对应 state.golden]',
+  factor_parameter_id  BIGINT UNSIGNED NULL     COMMENT '当前相关因素参数 [对应 currentFactor()]',
   run_no               INT UNSIGNED    NOT NULL DEFAULT 1 COMMENT '同事件内的第几次生成',
-  generation_type      ENUM('rule_based','llm') NOT NULL DEFAULT 'rule_based' COMMENT '生成方式：原型为本地规则，正式接入大模型时置 llm',
+  generation_type      ENUM('rule_based','llm') NOT NULL DEFAULT 'rule_based' COMMENT '生成方式：早期方案为本地规则，正式接入大模型时置 llm',
   model_name           VARCHAR(64)     NULL     COMMENT '模型名称（llm 时记录，便于追溯）',
   prompt_version       VARCHAR(32)     NULL     COMMENT '提示词版本',
   status               ENUM('running','completed','failed') NOT NULL DEFAULT 'running' COMMENT '生成状态',
@@ -803,8 +803,8 @@ CREATE TABLE analysis_run (
   CONSTRAINT fk_analysis_run_user FOREIGN KEY (generated_by) REFERENCES sys_user (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='分析批次（一次生成分析）';
 
--- 参考版本快照 [原型] analysisReference / referenceSnapshot()
--- 冻结当时的参考统计量：更换参考批次不修改已保存结论（原型明确规则）
+-- 参考版本快照 [对应 ] analysisReference / referenceSnapshot()
+-- 冻结当时的参考统计量：更换参考批次不修改已保存结论（要求规则）
 CREATE TABLE analysis_reference_snapshot (
   id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   run_id              BIGINT UNSIGNED NOT NULL COMMENT '分析批次（1:1）',
@@ -830,12 +830,12 @@ CREATE TABLE analysis_reference_snapshot (
   CONSTRAINT fk_analysis_reference_metric FOREIGN KEY (metric_id) REFERENCES quality_metric (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='分析参考版本快照';
 
--- 结构化结论 [原型] hypothesis 对象：
+-- 结构化结论 [对应 ] hypothesis 对象：
 --   id/hypothesis/rootCauseCategory/observation/supportingEvidence/
 --   contradictingEvidence/mechanism/sources/missingEvidence/validationActions/
 --   validationMethod/engineerDecision/engineerComment/validationResult/
 --   actualFinding/finalAction/analysisReference/analysisGeneratedAt/updatedAt
--- 工程师验证字段与"AI 原始建议"分列保存，互不覆盖（原型明确要求）
+-- 工程师验证字段与"AI 原始建议"分列保存，互不覆盖（要求要求）
 CREATE TABLE analysis_conclusion (
   id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   run_id              BIGINT UNSIGNED NOT NULL COMMENT '分析批次',
@@ -864,18 +864,18 @@ CREATE TABLE analysis_conclusion (
   CONSTRAINT fk_analysis_conclusion_user FOREIGN KEY (decided_by) REFERENCES sys_user (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI 结构化分析结论与工程师验证';
 
--- 结论依据与证据 [原型] basis[] / supportingEvidence[] / contradictingEvidence[]
+-- 结论依据与证据 [对应 ] basis[] / supportingEvidence[] / contradictingEvidence[]
 -- layer 取值：限值对照 / 变化趋势 / 参考对照 / 相关因素变化 / 观察事实
 CREATE TABLE conclusion_evidence (
   id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   conclusion_id     BIGINT UNSIGNED NOT NULL COMMENT '结论',
   evidence_type     ENUM('basis','support','contradict') NOT NULL COMMENT '依据/支持证据/反向证据',
-  layer             VARCHAR(64)     NULL     COMMENT '依据分层：限值对照等 [原型 basisItem.layer]',
+  layer             VARCHAR(64)     NULL     COMMENT '依据分层：限值对照等 [对应 basisItem.layer]',
   content           TEXT            NOT NULL COMMENT '证据内容',
-  fact_time         DATETIME        NULL     COMMENT '可定位的事实时间 [原型 basisItem.time]',
-  is_locateable     TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '1=可在趋势图中定位 [原型 basisItem.locate]',
+  fact_time         DATETIME        NULL     COMMENT '可定位的事实时间 [对应 basisItem.time]',
+  is_locateable     TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '1=可在趋势图中定位 [对应 basisItem.locate]',
   related_record_id BIGINT UNSIGNED NULL     COMMENT '关联抽检记录（证据入口）',
-  is_usable         TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '1=该依据可用于结论 [原型 usable]',
+  is_usable         TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '1=该依据可用于结论 [对应 usable]',
   sort_no           SMALLINT UNSIGNED NOT NULL DEFAULT 0,
   created_at        DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at        DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -891,11 +891,11 @@ CREATE TABLE conclusion_evidence (
 -- H. 8D 报告工作台
 -- =====================================================================
 
--- 8D 报告 [原型] reportFor()：reportId/eventId/batchId/status/savedAt/finalizedAt
--- 一事件一报告；定稿为原型内确认，非企业 OA 审批
+-- 8D 报告 [对应 ] reportFor()：reportId/eventId/batchId/status/savedAt/finalizedAt
+-- 一事件一报告；定稿为早期方案内确认，非企业 OA 审批
 CREATE TABLE eight_d_report (
   id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  code             VARCHAR(64)     NOT NULL COMMENT '报告编号，如 8D-QE-... [原型 reportId]',
+  code             VARCHAR(64)     NOT NULL COMMENT '报告编号，如 8D-QE-... [对应 reportId]',
   event_id         BIGINT UNSIGNED NOT NULL COMMENT '关联预警事件（唯一）',
   batch_id         BIGINT UNSIGNED NOT NULL COMMENT '生产批次',
   spec_id          BIGINT UNSIGNED NULL     COMMENT '产品规格',
@@ -905,7 +905,7 @@ CREATE TABLE eight_d_report (
   window_start_time DATETIME       NULL     COMMENT '异常时段开始',
   window_end_time  DATETIME        NULL     COMMENT '异常时段结束',
   affected_length_m DECIMAL(12,2)  NULL     COMMENT '预计涉及米数 m（待核定）',
-  status           ENUM('draft','finalized','obsolete') NOT NULL DEFAULT 'draft' COMMENT '报告状态 [原型 status：草稿/已定稿]',
+  status           ENUM('draft','finalized','obsolete') NOT NULL DEFAULT 'draft' COMMENT '报告状态 [对应 status：草稿/已定稿]',
   version_no       INT UNSIGNED    NOT NULL DEFAULT 1 COMMENT '当前版本号',
   owner_user_id    BIGINT UNSIGNED NULL     COMMENT '质量工程师（负责人）',
   reviewer_user_id BIGINT UNSIGNED NULL     COMMENT '批准人（待确认）',
@@ -928,8 +928,8 @@ CREATE TABLE eight_d_report (
   CONSTRAINT fk_eight_d_report_creator FOREIGN KEY (created_by) REFERENCES sys_user (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='8D 报告';
 
--- 8D 各章节内容 [原型] reportNames D1–D8
--- source_type 对应原型的来源标记：AI 预填（D1/D3/D4）/ 工程师负责 / 待补充
+-- 8D 各章节内容 [对应 ] reportNames D1–D8
+-- source_type 对应早期方案的来源标记：AI 预填（D1/D3/D4）/ 工程师负责 / 待补充
 CREATE TABLE eight_d_field (
   id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   report_id   BIGINT UNSIGNED NOT NULL COMMENT '报告',
@@ -947,7 +947,7 @@ CREATE TABLE eight_d_field (
   CONSTRAINT fk_eight_d_field_user FOREIGN KEY (updated_by) REFERENCES sys_user (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='8D 报告章节内容';
 
--- 报告修订历史 [原型] report.history 列表
+-- 报告修订历史 [对应 ] report.history 列表
 -- content_snapshot 保存当次 D1–D8 全文快照，便于逐版比对与审计
 CREATE TABLE eight_d_revision (
   id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -955,7 +955,7 @@ CREATE TABLE eight_d_revision (
   version_no       INT UNSIGNED    NOT NULL COMMENT '版本号',
   action           ENUM('create','save_draft','ai_prefill','finalize','export','reopen') NOT NULL COMMENT '动作',
   operator_user_id BIGINT UNSIGNED NULL     COMMENT '操作人',
-  summary          VARCHAR(500)    NULL     COMMENT '动作摘要 [原型 history[].action]',
+  summary          VARCHAR(500)    NULL     COMMENT '动作摘要 [对应 history[].action]',
   content_snapshot JSON            NOT NULL COMMENT 'D1–D8 全文快照 {"D1":"...",...}',
   created_at       DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -966,14 +966,14 @@ CREATE TABLE eight_d_revision (
 
 
 -- =====================================================================
--- I. 历史分析归档（原型"历史分析"）
--- 归档 = 冻结快照：只写不改。归档后不随当前数据变化（原型明确规则），
+-- I. 历史分析归档（早期方案"历史分析"）
+-- 归档 = 冻结快照：只写不改。归档后不随当前数据变化（要求规则），
 -- 因此本组表不设置 updated_at，也不随源记录级联更新
 -- =====================================================================
 
 CREATE TABLE analysis_archive (
   id                  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  code                VARCHAR(64)     NOT NULL COMMENT '归档案号，如 ARC-001 [原型 id]',
+  code                VARCHAR(64)     NOT NULL COMMENT '归档案号，如 ARC-001 [对应 id]',
   event_id            BIGINT UNSIGNED NULL     COMMENT '归档时的预警事件',
   run_id              BIGINT UNSIGNED NULL     COMMENT '归档时的分析批次',
   batch_id            BIGINT UNSIGNED NOT NULL COMMENT '生产批次',
@@ -1037,7 +1037,7 @@ CREATE TABLE analysis_archive_conclusion (
 
 
 -- =====================================================================
--- J. 操作与审计日志（原型 state.history：ai / decision / archive 事件）
+-- J. 操作与审计日志（早期方案 state.history：ai / decision / archive 事件）
 -- =====================================================================
 
 CREATE TABLE operation_log (
@@ -1047,7 +1047,7 @@ CREATE TABLE operation_log (
   action_type  VARCHAR(32)     NOT NULL COMMENT '动作：ai_generate/engineer_decision/archive/report_save/report_finalize/import/data_crud/notify/login',
   target_type  VARCHAR(64)     NULL     COMMENT '目标对象类型',
   target_id    VARCHAR(64)     NULL     COMMENT '目标对象标识',
-  detail       VARCHAR(1000)   NULL     COMMENT '操作说明 [原型 history[].action]',
+  detail       VARCHAR(1000)   NULL     COMMENT '操作说明 [对应 history[].action]',
   detail_json  JSON            NULL     COMMENT '结构化明细',
   ip_address   VARCHAR(64)     NULL,
   user_agent   VARCHAR(255)    NULL,
@@ -1066,7 +1066,7 @@ CREATE TABLE operation_log (
 -- 新增指标时需同步扩列；若指标频繁变动，建议改由后端动态透视。
 -- =====================================================================
 
--- 抽检记录宽表：保留原型 metricValue('ovality') 的取值规则
+-- 抽检记录宽表：保留早期方案 metricValue('ovality') 的取值规则
 -- （同截面最大/最小外径差优先，缺失时回落到入库的不圆度值）
 CREATE OR REPLACE VIEW v_inspection_record_wide AS
 SELECT

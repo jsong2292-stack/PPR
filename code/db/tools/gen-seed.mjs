@@ -1,20 +1,20 @@
 #!/usr/bin/env node
 /**
- * 生成 PPR 质量智能分析助手演示种子数据（seed.sql）
+ * 生成 PPR 质量智能分析助手基线数据 SQL（0002_seed.sql 的生成器）。
  * ------------------------------------------------------------------
- * 数据来源：PPR/原型/index.html
+ * 用途：`0002_seed.sql` 的基线数据由本脚本生成；调整基线数据请改本脚本后重新生成，
  *   - adminDefaults.tables（categories/specs/equipmentTypes/equipment/batches/metrics/products/deviceReadings）
- *   - mockProducts / mockDeviceReadings
+ * 变量命名沿用生成时的含义：
  *   - normalRecords（21 条样管抽检记录，3 批次 × 7 抽检时间）
  *   - scenarios[].process（7 条工艺记录 + 8 个温区设定/反馈）
- *   - DEMO_CONFIG（演示限值、趋势阈值、线速度）
+ *   - 限值/趋势阈值/线速度等常量
  *   - 规则 R1–R5
  *
  * 用法：node tools/gen-seed.mjs > seed.sql
  *
- * 注意：原型中的 A/B/C/D 演示场景是对同一基线数据（normalRecords）的临时
- * 改写，不是四份独立数据。因此种子只写入基线数据；需要制造演示异常时，
- * 使用 seed.sql 末尾"可选演示异常"段落。
+ * 注意：几种「异常场景」是对同一基线数据（normalRecords）的临时
+ * 改写，不是四份独立数据。因此这里只写入基线数据；需要制造异常样本时，
+ * 使用生成结果末尾的「可选异常样本」段落。
  */
 
 // ---------- 基础常量 ----------
@@ -29,7 +29,7 @@ const METRIC = {
   ovality: 6,
 };
 const PARAM = { temperature: 1, pressure: 2, haulOffSpeed: 3 };
-const SRC = { manual: 1, mes: 2, qms: 3, device: 4, localMock: 5, virtualProcess: 6 };
+const SRC = { manual: 1, mes: 2, qms: 3, device: 4, local模拟: 5, virtualProcess: 6 };
 const EXTRUDER = 1;
 const HAULOFF = 2;
 
@@ -40,7 +40,7 @@ const dt = (v) => (v === null || v === undefined ? 'NULL' : `'${v}'`);
 const out = [];
 const w = (line = '') => out.push(line);
 
-// ---------- 值计算（与原型公式一致） ----------
+// ---------- 值计算（与早期方案公式一致） ----------
 const baseTimes = [
   '2026-10-09 08:00:00',
   '2026-10-09 11:20:00',
@@ -74,7 +74,7 @@ batchIds.forEach((batchId, bi) => {
   });
 });
 
-// mockProducts：批次 × 生产日期，一个产品只有一份
+// 模拟Products：批次 × 生产日期，一个产品只有一份
 const productRows = [
   { id: 1, code: 'PRD-001', batchId: BATCH.c0034, date: '2026-10-09', od: 25.235, min: 4.32, max: 4.43, ov: 0.18 },
   { id: 2, code: 'PRD-002', batchId: BATCH.c0034, date: '2026-10-10', od: 25.24, min: 4.31, max: 4.42, ov: 0.18 },
@@ -84,7 +84,7 @@ const productRows = [
   { id: 6, code: 'PRD-006', batchId: BATCH.d0032, date: '2026-10-10', od: 25.25, min: 4.26, max: 4.4, ov: 0.19 },
 ];
 
-// mockDeviceReadings：6 组（批次 × 日期）× 11 小时 × 2 台设备
+// 模拟DeviceReadings：6 组（批次 × 日期）× 11 小时 × 2 台设备
 const hours = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'];
 const devicePlan = [
   { batchId: BATCH.c0034, date: '2026-10-09', t0: 199.9, tStep: 0.04, p0: 8.1, pStep: 0.004, h0: 12.55, hStep: 0.008 },
@@ -154,11 +154,11 @@ const processRows = baseTimes.map((t, i) => ({
 
 // ---------- 输出 ----------
 w('-- =====================================================================');
-w('-- PPR 质量智能分析助手 · 演示种子数据（MySQL 8.0）');
+w('-- PPR 质量智能分析助手 · 基线数据（MySQL 8.0）');
 w('-- 由 tools/gen-seed.mjs 生成，请勿手工修改；改数据请改生成脚本或直接改库');
 w('-- ---------------------------------------------------------------------');
 w('-- 前置：先执行 schema.sql（本脚本按全新库设计，重复执行会因主键冲突报错）');
-w('-- 数据性质：全部为原型 Mock Data / 模拟值，data_source.is_simulated = 1，');
+w('-- 数据性质：联调基线数据，data_source.is_simulated = 1，');
 w('--           不得作为正式生产能力或合格判定依据');
 w('-- =====================================================================');
 w();
@@ -203,16 +203,16 @@ w('INSERT INTO sys_user_role (user_id, role_id) VALUES (1, 1), (2, 3), (3, 4), (
 w();
 
 // 数据来源
-w('-- ---------- 数据来源字典（原型来源文案，全部标记为模拟来源） ----------');
+w('-- ---------- 数据来源字典（全部标记为联调模拟来源） ----------');
 w('INSERT INTO data_source (id, code, name, system_type, is_simulated, description, sort_no) VALUES');
 w(
   [
-    [SRC.manual, 'manual_entry', '演示录入', 'manual', 1, '原型本地录入的模拟数据'],
+    [SRC.manual, 'manual_entry', '生产录入', 'manual', 1, '现场录入的模拟数据'],
     [SRC.mes, 'mes_demo', 'MES模拟', 'mes', 1, '模拟 MES 生产数据，未接入真实 MES'],
     [SRC.qms, 'qms_demo', 'QMS模拟', 'qms', 1, '模拟 QMS 检验数据，未接入真实 QMS'],
     [SRC.device, 'device_demo', '设备采集', 'device', 1, '模拟设备逐小时采集数据，未接入真实数采'],
-    [SRC.localMock, 'local_mock', '本地 Mock Data', 'other', 1, '原型抽检记录的本地模拟数据集'],
-    [SRC.virtualProcess, 'virtual_process_data', '虚拟工艺数据', 'other', 1, '原型温区/牵引模拟工艺数据'],
+    [SRC.local模拟, 'inspection_ledger', '抽检台账', 'other', 1, '样管抽检记录的本地模拟数据集'],
+    [SRC.virtualProcess, 'virtual_process_data', '工艺记录', 'other', 1, '温区与牵引的模拟工艺数据'],
   ]
     .map((r) => `  (${r[0]}, ${q(r[1])}, ${q(r[2])}, ${q(r[3])}, ${r[4]}, ${q(r[5])}, ${r[0]})`)
     .join(',\n') + ';'
@@ -221,9 +221,9 @@ w();
 
 // 产线 / 主数据
 w('-- ---------- B. 产线、产品类别、规格、设备 ----------');
-w("INSERT INTO production_line (id, code, name, workshop, description) VALUES (1, 'LINE-A', '演示线 A', '演示车间', '原型中的演示产线');");
+w("INSERT INTO production_line (id, code, name, workshop, description) VALUES (1, 'LINE-A', '产线 A', '挤出车间', '模拟产线');");
 w();
-w("INSERT INTO product_category (id, code, name, description) VALUES (1, 'CAT-PPR', 'PPR 管材', '演示主数据');");
+w("INSERT INTO product_category (id, code, name, description) VALUES (1, 'CAT-PPR', 'PPR 管材', '产品主数据');");
 w();
 w(
   "INSERT INTO product_spec (id, code, name, category_id, nominal_outer_diameter_mm, nominal_wall_thickness_mm, ovality_max_mm, status) VALUES\n" +
@@ -232,14 +232,14 @@ w(
 w();
 w(
   "INSERT INTO equipment_type (id, code, name, description) VALUES\n" +
-    "  (1, 'ETYPE-EXTRUDER', '挤出机', '演示设备类型'),\n" +
-    "  (2, 'ETYPE-HAULOFF', '牵引机', '演示设备类型');"
+    "  (1, 'ETYPE-EXTRUDER', '挤出机', '设备类型'),\n" +
+    "  (2, 'ETYPE-HAULOFF', '牵引机', '设备类型');"
 );
 w();
 w(
   "INSERT INTO equipment (id, code, name, type_id, line_id, status, description) VALUES\n" +
-    "  (1, 'EQ-EX-01', '挤出机-01', 1, 1, 'enabled', '演示设备'),\n" +
-    "  (2, 'EQ-HO-01', '牵引机-01', 2, 1, 'enabled', '演示设备');"
+    "  (1, 'EQ-EX-01', '挤出机-01', 1, 1, 'enabled', '设备'),\n" +
+    "  (2, 'EQ-HO-01', '牵引机-01', 2, 1, 'enabled', '设备');"
 );
 w();
 
@@ -262,7 +262,7 @@ w(
     .join(',\n') + ';'
 );
 w();
-w('-- 演示限值：limit_type=demo，原型明确"演示限值不代表国标要求，不作合格判定"');
+w('-- 待标定限值：limit_type=demo，早期方案明确"待标定限值不代表国标要求，不作合格判定"');
 w('INSERT INTO metric_spec_limit (spec_id, metric_id, lower_limit, upper_limit, limit_type, calibration_status, remark) VALUES');
 w(
   [
@@ -270,7 +270,7 @@ w(
     [METRIC.minWallThickness, 4.2, 4.8],
     [METRIC.ovality, 0.0, 0.35],
   ]
-    .map((r) => `  (1, ${r[0]}, ${r[1].toFixed(3)}, ${r[2].toFixed(3)}, 'demo', 'demo', '演示限值，正式标准与产品限值待确认')`)
+    .map((r) => `  (1, ${r[0]}, ${r[1].toFixed(3)}, ${r[2].toFixed(3)}, 'demo', 'demo', '待标定限值，正式标准与产品限值待确认')`)
     .join(',\n') + ';'
 );
 w();
@@ -281,16 +281,16 @@ w(
     "  (3, 'haul_off_speed', '牵引速度', 'm/min', 2, 3);"
 );
 w();
-w('-- 指标与影响因素关联 [原型 metrics.influences]');
+w('-- 指标与影响因素关联 [对应 metrics.influences]');
 w(
   'INSERT INTO metric_influence (metric_id, parameter_id, remark) VALUES\n' +
-    `  (${METRIC.outerDiameter}, ${PARAM.temperature}, '演示关联，未验证因果'),\n` +
-    `  (${METRIC.outerDiameter}, ${PARAM.pressure}, '演示关联，未验证因果'),\n` +
-    `  (${METRIC.minWallThickness}, ${PARAM.temperature}, '演示关联，未验证因果'),\n` +
-    `  (${METRIC.minWallThickness}, ${PARAM.haulOffSpeed}, '演示关联，未验证因果'),\n` +
-    `  (${METRIC.ovality}, ${PARAM.temperature}, '演示关联，未验证因果'),\n` +
-    `  (${METRIC.ovality}, ${PARAM.pressure}, '演示关联，未验证因果'),\n` +
-    `  (${METRIC.ovality}, ${PARAM.haulOffSpeed}, '演示关联，未验证因果');`
+    `  (${METRIC.outerDiameter}, ${PARAM.temperature}, '模拟关联，未验证因果'),\n` +
+    `  (${METRIC.outerDiameter}, ${PARAM.pressure}, '模拟关联，未验证因果'),\n` +
+    `  (${METRIC.minWallThickness}, ${PARAM.temperature}, '模拟关联，未验证因果'),\n` +
+    `  (${METRIC.minWallThickness}, ${PARAM.haulOffSpeed}, '模拟关联，未验证因果'),\n` +
+    `  (${METRIC.ovality}, ${PARAM.temperature}, '模拟关联，未验证因果'),\n` +
+    `  (${METRIC.ovality}, ${PARAM.pressure}, '模拟关联，未验证因果'),\n` +
+    `  (${METRIC.ovality}, ${PARAM.haulOffSpeed}, '模拟关联，未验证因果');`
 );
 w();
 w('INSERT INTO temp_zone (id, code, name, equipment_id, default_setpoint_c, sort_no) VALUES');
@@ -313,7 +313,7 @@ w(
 w();
 w('-- 产品数据：批次号 + 生产日期唯一（一个产品只有一份）');
 w('INSERT INTO product_data (id, code, batch_id, production_date, data_source_id, remark) VALUES');
-w(productRows.map((p) => `  (${p.id}, ${q(p.code)}, ${p.batchId}, '${p.date}', ${SRC.mes}, '原型 Mock 产品数据')`).join(',\n') + ';');
+w(productRows.map((p) => `  (${p.id}, ${q(p.code)}, ${p.batchId}, '${p.date}', ${SRC.mes}, '早期方案 模拟 产品数据')`).join(',\n') + ';');
 w();
 w('INSERT INTO product_data_value (product_data_id, metric_id, metric_value, is_derived) VALUES');
 w(
@@ -345,7 +345,7 @@ w(
     .join(',\n') + ';'
 );
 w();
-w('-- 工艺记录（原型 scenarios[].process；四个演示场景内容一致，此处只写一份）');
+w('-- 工艺记录（早期方案 scenarios[].process；四个异常场景内容一致，此处只写一份）');
 w('INSERT INTO process_record (id, code, batch_id, equipment_id, record_time, data_source_id, time_match_status, haul_off_feedback_mpm, pipe_line_speed_mpm, mass_output_kgh, measured_unit_weight_kgpm, production_group) VALUES');
 w(
   processRows
@@ -369,13 +369,13 @@ w(
 w();
 
 // 抽检记录
-w('-- ---------- F. 样管抽检记录（原型 normalRecords 基线：3 批次 × 7 时间） ----------');
+w('-- ---------- F. 样管抽检记录（早期方案 normalRecords 基线：3 批次 × 7 时间） ----------');
 w('INSERT INTO inspection_record (id, code, sample_no, batch_id, spec_id, production_group, inspect_time, measurement_stage, inspection_method, instrument_info, quality_flag, simulated_ovality, data_source_id, record_status) VALUES');
 w(
   inspectionRows
     .map(
       (r) =>
-        `  (${r.id}, ${q(r.code)}, ${q(r.sampleNo)}, ${r.batchId}, 1, ${q(r.group)}, ${dt(r.inspectTime)}, 'unconfirmed', '待确认', '待确认', 'none', 0, ${SRC.localMock}, 'valid')`
+        `  (${r.id}, ${q(r.code)}, ${q(r.sampleNo)}, ${r.batchId}, 1, ${q(r.group)}, ${dt(r.inspectTime)}, 'unconfirmed', '待确认', '待确认', 'none', 0, ${SRC.local模拟}, 'valid')`
     )
     .join(',\n') + ';'
 );
@@ -394,16 +394,16 @@ w(
 w();
 
 // 规则
-w('-- ---------- 预警规则 R1–R5（顺序判断；阈值均为演示策略，待现场验证） ----------');
+w('-- ---------- 预警规则 R1–R5（顺序判断；阈值均为未标定阈值，待现场验证） ----------');
 w('INSERT INTO alert_rule (id, code, name, risk_type, evaluate_order, rule_category, metric_id, params_json, calibration_status, is_terminal, description) VALUES');
 w(
   // [id, code, name, risk_type, evaluate_order, rule_category, metric_id, params_json, is_terminal, description]
   [
     [1, 'R1', '数据记录差异待核对', 'error', 1, 'data_consistency', null, '{"tolerance_mm":0.05,"match_window_minutes":30}', 0, '两条来源记录差值超过容差：先核对样管编号与原始记录，不作产品不合格结论'],
     [2, 'R2', '原始测量数据错误 / 样管规格匹配待核对', 'error', 2, 'data_validity', null, '{}', 0, '最大外径小于最小外径、缺少同截面测点，或记录与当前规格差异明显时触发'],
-    [3, 'R3', '演示限值对照（待确认）', 'medium', 3, 'spec_limit', null, '{}', 0, '对照 metric_spec_limit；limit_type=demo 时不构成合格判定'],
+    [3, 'R3', '待标定限值对照（待确认）', 'medium', 3, 'spec_limit', null, '{}', 0, '对照 metric_spec_limit；limit_type=demo 时不构成合格判定'],
     [4, 'R4', '待复核趋势', 'medium', 4, 'trend', null, '{"consecutive":3,"minimum_change_mm":0.015,"maximum_gap_minutes":240}', 0, '连续同向变化达阈值：需人工复核运行连续性，停机/换规格状态由 production_event 提供'],
-    [5, 'R5', '未发现演示框架触发项', 'normal', 5, 'fallback', null, '{}', 1, '兜底规则：未触发任何项，不代表产品已完成正式判定'],
+    [5, 'R5', '未发现模拟框架触发项', 'normal', 5, 'fallback', null, '{}', 1, '兜底规则：未触发任何项，不代表产品已完成正式判定'],
   ]
     .map(
       (r) =>
@@ -426,9 +426,9 @@ w('-- SELECT COUNT(*) AS process_zone_cnt FROM process_zone_value;        -- 56'
 w('-- SELECT batch_no, data_source_name, outer_diameter_mm, min_wall_thickness_mm, ovality_effective_mm FROM v_inspection_record_wide LIMIT 5;');
 w();
 w('-- =====================================================================');
-w('-- 可选演示异常：默认不启用。取消注释后执行，可在新系统中复现');
-w('-- 原型场景 A（R4 待复核趋势）与场景 C（R1 QMS/MES 差异）。');
-w('-- 注意：这会改写基线数据，仅用于演示环境。');
+w('-- 可选模拟异常：默认不启用。取消注释后执行，可在新系统中复现');
+w('-- 早期方案场景 A（R4 待复核趋势）与场景 C（R1 QMS/MES 差异）。');
+w('-- 注意：这会改写基线数据，仅用于模拟环境。');
 w('-- =====================================================================');
 w('-- 场景 A：批次 12121D0032 最近三个点最小壁厚连续下降 4.29 → 4.27 → 4.26');
 w('-- UPDATE inspection_value v JOIN inspection_record r ON r.id = v.record_id');

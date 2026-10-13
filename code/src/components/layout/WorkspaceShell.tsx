@@ -20,17 +20,20 @@ export function WorkspaceShell({
   user: SidebarUser & { department?: string | null };
   children: ReactNode;
 }) {
+  // 折叠状态唯一来源：外框持有，侧边栏只消费。收起/展开只有顶栏右上角这一个入口。
   const [collapsed, setCollapsed] = useState(false);
+  const toggleCollapsed = () => setCollapsed((value) => !value);
 
   return (
     <ToastProvider>
       <div className="p-app" data-collapsed={collapsed ? 'true' : 'false'}>
-        <Sidebar user={user} />
+        <Sidebar user={user} collapsed={collapsed} />
         <header className="p-header">
           <button
             type="button"
             className="u-btn u-btn--ghost u-btn--small"
-            onClick={() => setCollapsed((value) => !value)}
+            onClick={toggleCollapsed}
+            title={collapsed ? '展开导航' : '收起导航'}
             aria-label={collapsed ? '展开导航' : '收起导航'}
             aria-pressed={collapsed}
           >

@@ -143,13 +143,16 @@ textarea {
   grid-area: sidebar;
   background: var(--c-surface);
   border-right: 1px solid var(--c-border);
-  padding: 14px 10px;
+  /* 底部留白交给脚注自己，这样吸附与不吸附两种状态下它到屏幕底边的距离一致 */
+  padding: 14px 10px 0;
   display: flex;
   flex-direction: column;
   gap: 14px;
   position: sticky;
   top: 0;
   height: 100vh;
+  /* 侧边栏是唯一滚动容器：品牌区/菜单/脚注宽度始终一致。
+     若把滚动挪进 .p-nav，那里的滚动条会占掉约 15px，菜单项会比上下两块窄一截。 */
   overflow-y: auto;
 }
 
@@ -231,8 +234,9 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  flex: 1;
-  min-height: 0;
+  /* 不参与收缩：菜单再长也保持自然高度，交给外层侧边栏滚动。
+     原来是 flex:1 + min-height:0，导航被压扁后内容原地溢出、直接盖在脚注上。 */
+  flex: none;
 }
 
 .p-nav__group-title {
@@ -304,11 +308,69 @@ textarea {
 }
 
 .p-sidebar__foot {
+  flex: none;
+  /* 菜单不足一屏时用 auto margin 顶到最底；超出时吸附在滚动视口底部。
+     不透明底色是必需的：菜单项会从它下面滚过去，必须挡住。 */
+  margin-top: auto;
+  position: sticky;
+  bottom: 0;
+  background: var(--c-surface);
   border-top: 1px solid var(--c-border);
-  padding: 10px;
-  font-size: 11px;
-  color: var(--c-text-muted);
-  line-height: 1.6;
+  padding: 10px 10px 14px;
+}
+
+/* 侧边栏底部账号卡：头像 + 姓名/角色两行。
+   脚注内容区已内缩 20px（侧边栏 10 + 脚注 10），这里不再加左右内边距，
+   头像正好落在 x=20 与导航图标同一竖线；间距 12px 让姓名落在 x=62，
+   与品牌区标题同一竖线。 */
+.p-userbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+  min-width: 0;
+}
+
+.p-userbar__avatar {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--c-primary-soft);
+  border: 1px solid #bfdbfe;
+  color: var(--c-primary-dark);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  user-select: none;
+}
+
+.p-userbar__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.p-userbar__name,
+.p-userbar__role {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.p-userbar__name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.p-userbar__role {
+  font-size: 10.5px;
+  color: var(--c-text-faint);
 }
 
 /* ── 页头 ─────────────────────────────────────────────────────────── */

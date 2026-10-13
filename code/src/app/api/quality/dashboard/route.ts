@@ -14,7 +14,9 @@ export async function GET() {
         FROM ppr_alert_event a JOIN ppr_product_measurement m ON m.id=a.measurement_id
         JOIN ppr_batch b ON b.id=m.batch_id JOIN ppr_product_spec s ON s.id=b.spec_id
         ORDER BY a.detected_at DESC`),
-      dbClient.queryAll(`SELECT m.*, b.batch_no, s.name AS spec_name FROM ppr_product_measurement m
+      dbClient.queryAll(`SELECT m.*, b.batch_no, s.id AS spec_id, s.code AS spec_code, s.name AS spec_name,
+        s.outer_lower_mm, s.outer_upper_mm, s.wall_lower_mm, s.wall_upper_mm, s.ovality_upper_mm
+        FROM ppr_product_measurement m
         JOIN ppr_batch b ON b.id=m.batch_id JOIN ppr_product_spec s ON s.id=b.spec_id ORDER BY m.inspect_time ASC`),
       dbClient.queryAll(`SELECT r.*, b.batch_no, e.name AS equipment_name FROM ppr_equipment_reading r
         JOIN ppr_batch b ON b.id=r.batch_id JOIN ppr_equipment e ON e.id=r.equipment_id ORDER BY r.collect_time ASC`),

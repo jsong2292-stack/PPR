@@ -1,0 +1,17 @@
+# macOS 元数据
+.DS_Store
+
+# 日志
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 依赖与构建产物（可在本地重新生成，不应入库）
+node_modules/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo

@@ -3,3 +3,10 @@ node_modules/
 .env.*
 !.env.example
 *.log
+
+# Next.js 构建产物与 Turbopack 缓存（可在本地重新生成，不应入库）
+.next/
+out/
+
+# TypeScript 增量编译缓存
+*.tsbuildinfo

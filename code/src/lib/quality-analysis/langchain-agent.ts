@@ -51,15 +51,16 @@ export async function generateLangChainAgentAnalysis(alertId: number, config: Qu
   if (!context) throw new Error('预警事件不存在');
   const toolTrace: ToolTraceItem[] = [];
   const tools = createQualityAgentTools(context, toolTrace);
-  const useResponsesApi = process.env.QUALITY_AGENT_USE_RESPONSES_API !== 'false';
-
   const model = new ChatOpenAI({
     model: config.model,
     apiKey: config.apiKey,
-    useResponsesApi,
+    useResponsesApi: config.useResponsesApi,
     timeout: config.timeoutMs,
     maxRetries: 2,
-    reasoning: config.reasoningEffort === 'none' ? undefined : { effort: config.reasoningEffort },
+    reasoning: !config.useResponsesApi || config.reasoningEffort === 'none' ? undefined : { effort: config.reasoningEffort },
+    modelKwargs: !config.useResponsesApi && config.thinkingMode !== 'auto'
+      ? { thinking: { type: config.thinkingMode } }
+      : undefined,
     configuration: config.baseUrl ? { baseURL: config.baseUrl } : undefined,
   });
 

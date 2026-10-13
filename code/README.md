@@ -113,6 +113,7 @@ QUALITY_AGENT_MODEL=gpt-6-luna
 # 使用OpenAI兼容网关时填写
 QUALITY_AGENT_BASE_URL=
 QUALITY_AGENT_USE_RESPONSES_API=true
+QUALITY_AGENT_THINKING_MODE=disabled
 QUALITY_AGENT_FALLBACK_TO_RULE=true
 ```
 
@@ -128,6 +129,13 @@ QUALITY_AGENT_FALLBACK_TO_RULE=true
 
 ```bash
 QUALITY_AGENT_USE_RESPONSES_API=false
+```
+
+对于 DeepSeek V4 等开启 thinking 后不支持强制 `tool_choice` 的模型，还需要关闭 thinking：
+
+```bash
+QUALITY_AGENT_THINKING_MODE=disabled
+QUALITY_AGENT_REASONING_EFFORT=none
 ```
 
 Agent 模式提供以下受限只读工具：

@@ -13,6 +13,7 @@ export async function GET(_request: NextRequest) {
     model: config.model,
     fallbackToRule: config.fallbackToRule,
     framework: 'LangChain createAgent',
-    useResponsesApi: process.env.QUALITY_AGENT_USE_RESPONSES_API !== 'false',
+    useResponsesApi: config.useResponsesApi,
+    thinkingMode: config.thinkingMode,
   });
 }

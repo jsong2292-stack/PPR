@@ -12,6 +12,8 @@ export interface QualityAgentConfig {
   maxToolRounds: number;
   timeoutMs: number;
   reasoningEffort: 'none' | 'minimal' | 'low' | 'medium' | 'high';
+  useResponsesApi: boolean;
+  thinkingMode: 'auto' | 'enabled' | 'disabled';
 }
 
 function normalizeMode(value: string | null | undefined): QualityAnalysisMode {
@@ -41,6 +43,11 @@ export async function getQualityAgentConfig(requestedMode?: QualityAnalysisMode)
   const reasoningEffort = ['none', 'minimal', 'low', 'medium', 'high'].includes(configuredEffort)
     ? configuredEffort as QualityAgentConfig['reasoningEffort']
     : 'low';
+  const useResponsesApi = process.env.QUALITY_AGENT_USE_RESPONSES_API !== 'false';
+  const configuredThinkingMode = process.env.QUALITY_AGENT_THINKING_MODE || (useResponsesApi ? 'auto' : 'disabled');
+  const thinkingMode = ['auto', 'enabled', 'disabled'].includes(configuredThinkingMode)
+    ? configuredThinkingMode as QualityAgentConfig['thinkingMode']
+    : 'disabled';
 
   return {
     mode,
@@ -52,5 +59,7 @@ export async function getQualityAgentConfig(requestedMode?: QualityAnalysisMode)
     maxToolRounds: Math.max(2, Math.min(20, maxToolRounds)),
     timeoutMs: Math.max(10000, Math.min(300000, timeoutMs)),
     reasoningEffort,
+    useResponsesApi,
+    thinkingMode,
   };
 }

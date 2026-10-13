@@ -4,9 +4,11 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import {
-  AlertTriangle, Archive, ChevronLeft, ChevronRight, ClipboardCheck, Gauge,
+  AlertTriangle, Archive, ChevronDown, ChevronLeft, ChevronRight, ClipboardCheck, Gauge, ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/lib/auth-client';
+import { ADMIN_MENU_GROUPS } from '@/lib/admin-menu';
 
 const flows = [
   { label: '质量监控与预警', href: '/quality/monitor', icon: AlertTriangle },
@@ -17,7 +19,11 @@ const flows = [
 
 export function QualityShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { user } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
+  const [backendOpen, setBackendOpen] = useState(false);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const isAdmin = user?.role === 'admin';
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-50">
@@ -28,6 +34,34 @@ export function QualityShell({ children }: { children: React.ReactNode }) {
               {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
             </button>
             <nav className="space-y-2">
+              {isAdmin && <>
+                <div>
+                  <button onClick={() => !collapsed && setBackendOpen((value) => !value)} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-600 hover:bg-slate-50">
+                    <ShieldCheck size={18} className="shrink-0" />
+                    {!collapsed && <><span className="flex-1">后台管理</span><ChevronDown size={15} className={cn('transition-transform', backendOpen ? '' : '-rotate-90')} /></>}
+                  </button>
+                  {!collapsed && backendOpen && <div className="ml-5 mt-1 space-y-1 border-l border-slate-200 pl-3">
+                    {ADMIN_MENU_GROUPS.map((group) => {
+                      const GroupIcon = group.icon;
+                      const opened = Boolean(openGroups[group.key]);
+                      return <div key={group.key}>
+                        <button onClick={() => setOpenGroups((state) => ({ ...state, [group.key]: !state[group.key] }))} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-600 hover:bg-slate-50">
+                          <GroupIcon size={15} className="shrink-0" />
+                          <span className="flex-1">{group.label}</span>
+                          <ChevronDown size={14} className={cn('transition-transform', opened ? '' : '-rotate-90')} />
+                        </button>
+                        {opened && <div className="ml-4 mt-1 space-y-1 border-l border-slate-200 pl-3">
+                          {group.items.map((item) => {
+                            const Icon = item.icon; const active = pathname === item.href;
+                            return <Link key={item.href} href={item.href} className={cn('flex items-center gap-2 rounded-lg px-3 py-2 text-sm', active ? 'bg-blue-50 font-semibold text-blue-700' : 'text-slate-600 hover:bg-slate-50')}><Icon size={15} />{item.label}</Link>;
+                          })}
+                        </div>}
+                      </div>;
+                    })}
+                  </div>}
+                </div>
+                <div className="my-3 border-t border-slate-200" />
+              </>}
               {flows.map((item) => {
                 const Icon = item.icon; const active = pathname.startsWith(item.href);
                 return <Link key={item.href} href={item.href} title={collapsed ? item.label : undefined} className={cn('flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm', active ? 'bg-blue-50 font-semibold text-blue-700' : 'text-slate-600 hover:bg-slate-50')}><Icon size={18} className="shrink-0" />{!collapsed && item.label}</Link>;

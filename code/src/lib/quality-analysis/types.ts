@@ -21,6 +21,37 @@ export const QualityAnalysisSchema = z.object({
 
 export type QualityAnalysisOutput = z.infer<typeof QualityAnalysisSchema>;
 
+
+export type AnalysisProgressStage =
+  | 'preparing'
+  | 'model'
+  | 'tool'
+  | 'validation'
+  | 'rule'
+  | 'fallback'
+  | 'persistence'
+  | 'complete';
+
+/** 对前端公开的可审计分析过程；不包含模型内部隐式思维链。 */
+export interface AnalysisProgressEvent {
+  stage: AnalysisProgressStage;
+  status: 'running' | 'success' | 'warning' | 'error';
+  message: string;
+  detail?: string;
+  tool?: string;
+  timestamp: string;
+}
+
+export type AnalysisProgressReporter = (event: AnalysisProgressEvent) => void | Promise<void>;
+
+export async function reportAnalysisProgress(
+  reporter: AnalysisProgressReporter | undefined,
+  event: Omit<AnalysisProgressEvent, 'timestamp'>
+): Promise<void> {
+  if (!reporter) return;
+  await reporter({ ...event, timestamp: new Date().toISOString() });
+}
+
 export interface ToolTraceItem {
   tool: string;
   input: unknown;

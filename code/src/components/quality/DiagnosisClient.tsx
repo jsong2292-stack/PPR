@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { AnalysisProcessPanel, type AnalysisProcessEvent } from './AnalysisProcessPanel';
 import { MetricTrendCard } from './MetricTrendCard';
 import { PageHeader } from './PageHeader';
 
@@ -74,6 +75,9 @@ export function DiagnosisClient() {
   const [mode, setMode] = useState<AnalysisMode>('rule');
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [processEvents, setProcessEvents] = useState<AnalysisProcessEvent[]>([]);
+  const [processExpanded, setProcessExpanded] = useState(false);
+  const [processFinished, setProcessFinished] = useState(false);
 
   const loadAlerts = useCallback(async () => {
     const response = await fetch('/api/quality/dashboard');
@@ -120,10 +124,14 @@ export function DiagnosisClient() {
   const generate = async () => {
     if (!alertId) return toast.warning('请选择预警事件');
     setGenerating(true);
+    setProcessEvents([]);
+    setProcessFinished(false);
+    setProcessExpanded(true);
+    let resultReceived = false;
     try {
       const response = await fetch('/api/quality/analysis', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
         body: JSON.stringify({
           alertId: Number(alertId),
           mode,
@@ -131,13 +139,58 @@ export function DiagnosisClient() {
           generatedBy: '质量工程师',
         }),
       });
-      const json = await response.json();
-      if (!response.ok) throw new Error(json.error);
-      setAnalysis(json.data);
-      if (json.data?.fallback_reason) toast.warning(`Agent已降级：${json.data.fallback_reason}`);
-      else toast.success(mode === 'agent' ? 'LangChain Agent分析已完成' : '规则分析已完成');
+      if (!response.ok || !response.body) {
+        const json = await response.json().catch(() => ({}));
+        throw new Error(json.error || '无法建立分析流');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let streamError = '';
+
+      const handleBlock = (block: string) => {
+        if (!block.trim()) return;
+        let eventName = 'progress';
+        const dataLines: string[] = [];
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event:')) eventName = line.slice(6).trim();
+          if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+        }
+        if (!dataLines.length) return;
+        const payload = JSON.parse(dataLines.join('\n'));
+        if (eventName === 'progress') {
+          setProcessEvents((current) => [...current, payload as AnalysisProcessEvent]);
+        } else if (eventName === 'result') {
+          resultReceived = true;
+          setAnalysis(payload.data);
+          if (payload.data?.fallback_reason) toast.warning(`Agent已降级：${payload.data.fallback_reason}`);
+          else toast.success(mode === 'agent' ? 'LangChain Agent分析已完成' : '规则分析已完成');
+        } else if (eventName === 'error') {
+          streamError = payload.message || '生成分析失败';
+          setProcessEvents((current) => [...current, {
+            stage: 'complete', status: 'error', message: '分析过程执行失败', detail: streamError,
+            timestamp: new Date().toISOString(),
+          }]);
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const blocks = buffer.split('\n\n');
+        buffer = blocks.pop() || '';
+        blocks.forEach(handleBlock);
+        if (done) break;
+      }
+      if (buffer.trim()) handleBlock(buffer);
+      if (streamError) throw new Error(streamError);
+      if (!resultReceived) throw new Error('分析流结束但未返回结果');
+      setProcessFinished(true);
+      window.setTimeout(() => setProcessExpanded(false), 1400);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '生成失败');
+      setProcessFinished(true);
     } finally {
       setGenerating(false);
     }
@@ -208,6 +261,14 @@ export function DiagnosisClient() {
       <div className="flex items-center gap-2"><Settings2 size={16} /><b>当前选择：{mode === 'agent' ? 'LangChain Agent' : '规则引擎'}</b><span>· 系统默认 {agentStatus.mode === 'agent' ? 'Agent' : '规则'}</span></div>
       <span>{mode === 'agent' ? (agentStatus.configured ? `模型 ${agentStatus.model} · ${agentStatus.framework}` : `未配置API密钥${agentStatus.fallbackToRule ? '，将自动降级规则模式' : ''}`) : '确定性规则和模板，不调用大模型'}</span>
     </div>}
+
+    <AnalysisProcessPanel
+      events={processEvents}
+      expanded={processExpanded}
+      generating={generating}
+      finished={processFinished}
+      onToggle={() => setProcessExpanded((value) => !value)}
+    />
 
     {selected && <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {[['预警事件', selected.event_no], ['生产批次', selected.batch_no], ['触发规则', `${selected.rule_code} · ${selected.rule_name}`], ['观测值', `${selected.observed_value ?? '—'} mm`]].map(([label, value]) =>

@@ -1,7 +1,7 @@
 import { createAgent, toolStrategy } from 'langchain';
 import { ChatOpenAI } from '@langchain/openai';
 import { createQualityAgentTools, loadAlertAgentContext } from './data-tools';
-import { QualityAnalysisSchema, type AnalysisGenerationResult, type ToolTraceItem } from './types';
+import { QualityAnalysisSchema, reportAnalysisProgress, type AnalysisGenerationResult, type AnalysisProgressReporter, type ToolTraceItem } from './types';
 import type { QualityAgentConfig } from './config';
 
 const PROMPT_VERSION = 'quality-agent-v1.0';
@@ -44,13 +44,26 @@ function collectUsage(messages: unknown[]): Record<string, unknown> {
   return { inputTokens, outputTokens, totalTokens };
 }
 
-export async function generateLangChainAgentAnalysis(alertId: number, config: QualityAgentConfig): Promise<AnalysisGenerationResult> {
+export async function generateLangChainAgentAnalysis(
+  alertId: number,
+  config: QualityAgentConfig,
+  reporter?: AnalysisProgressReporter
+): Promise<AnalysisGenerationResult> {
   if (!config.apiKey) throw new Error('Agent模式未配置API密钥');
   const startedAt = Date.now();
+  await reportAnalysisProgress(reporter, { stage: 'preparing', status: 'running', message: '正在读取预警事件与分析边界' });
   const context = await loadAlertAgentContext(alertId);
   if (!context) throw new Error('预警事件不存在');
+  await reportAnalysisProgress(reporter, {
+    stage: 'preparing', status: 'success', message: `已锁定事件 ${context.event_no} 与批次 ${context.batch_no}`,
+    detail: `指标 ${context.metric_code}，触发规则 ${context.rule_name}`,
+  });
   const toolTrace: ToolTraceItem[] = [];
-  const tools = createQualityAgentTools(context, toolTrace);
+  const tools = createQualityAgentTools(context, toolTrace, reporter);
+  await reportAnalysisProgress(reporter, {
+    stage: 'model', status: 'running', message: `正在初始化模型 ${config.model}`,
+    detail: config.useResponsesApi ? 'Responses API' : `Chat Completions · thinking ${config.thinkingMode}`,
+  });
   const model = new ChatOpenAI({
     model: config.model,
     apiKey: config.apiKey,
@@ -72,6 +85,10 @@ export async function generateLangChainAgentAnalysis(alertId: number, config: Qu
     responseFormat: toolStrategy(QualityAnalysisSchema),
   });
 
+  await reportAnalysisProgress(reporter, {
+    stage: 'model', status: 'running', message: '模型开始规划取证步骤并调用质量数据工具',
+    detail: '仅展示可审计工具与证据轨迹，不展示模型内部隐式思维链',
+  });
   const result = await agent.invoke({
     messages: [{
       role: 'user',
@@ -81,9 +98,14 @@ export async function generateLangChainAgentAnalysis(alertId: number, config: Qu
     recursionLimit: config.maxToolRounds * 2 + 4,
   });
 
+  await reportAnalysisProgress(reporter, { stage: 'validation', status: 'running', message: '工具调用结束，正在校验结构化分析结果' });
   if (!result.structuredResponse) throw new Error('Agent未返回符合Schema的结构化分析结果');
   const output = QualityAnalysisSchema.parse(result.structuredResponse);
   const messages = Array.isArray(result.messages) ? result.messages : [];
+  await reportAnalysisProgress(reporter, {
+    stage: 'validation', status: 'success', message: `结构化校验通过，生成 ${output.conclusions.length} 条待验证结论`,
+    detail: `累计调用 ${toolTrace.length} 次数据工具`,
+  });
 
   return {
     output,

@@ -896,3 +896,69 @@ pnpm ts-check
 pnpm lint:build
 pnpm build
 ```
+
+---
+
+## 20. 页面流式分析过程
+
+诊断页面通过同一个分析接口的 SSE 模式接收实时进度：
+
+```http
+POST /api/quality/analysis
+Accept: text/event-stream
+```
+
+服务端事件类型：
+
+```text
+progress  可审计分析步骤
+result    完整分析结果
+error     执行错误
+```
+
+`progress` 事件结构：
+
+```json
+{
+  "stage": "tool",
+  "status": "success",
+  "message": "查询同批次产品检验序列完成",
+  "detail": "返回 5 条记录，耗时 12 ms",
+  "tool": "get_batch_measurements",
+  "timestamp": "2026-10-13T08:52:50.000Z"
+}
+```
+
+当前阶段包括：
+
+```text
+preparing   模式选择、事件和分析边界准备
+model       模型初始化、Agent开始规划取证
+tool        白名单工具开始和完成
+validation  结构化结果校验
+rule        规则引擎分析过程
+fallback    Agent降级
+persistence 分析结果入库
+complete    全流程完成
+```
+
+前端组件：
+
+```text
+src/components/quality/AnalysisProcessPanel.tsx
+```
+
+交互规则：
+
+1. 用户点击“生成分析”后，过程区域自动展开；
+2. 服务端每完成一个可审计步骤即推送一条 SSE 事件；
+3. 前端逐条追加显示工具名称、返回记录数和耗时；
+4. 生成过程中区域保持展开并自动滚动到底部；
+5. 结果保存成功后显示“已完成”；
+6. 完成约 1.4 秒后自动收起为摘要栏；
+7. 用户可再次点击摘要栏展开完整轨迹；
+8. 执行失败时区域保持可查看，并显示错误步骤。
+
+安全边界：
+
+> 页面展示的是模式选择、工具调用、证据数量、结构化校验和入库状态等可审计过程，不展示或要求模型输出内部隐式思维链（Chain of Thought）。最终分析依据仍以工具证据、结构化结论和工程师验证为准。

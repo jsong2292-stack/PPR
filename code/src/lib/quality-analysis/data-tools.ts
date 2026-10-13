@@ -1,7 +1,7 @@
 import { tool } from 'langchain';
 import { z } from 'zod';
 import { dbClient } from '@/lib/quality';
-import type { ToolTraceItem } from './types';
+import { reportAnalysisProgress, type AnalysisProgressReporter, type ToolTraceItem } from './types';
 
 type Row = Record<string, unknown>;
 
@@ -27,17 +27,61 @@ export async function loadAlertAgentContext(alertId: number): Promise<AlertAgent
     WHERE a.id=?`, [alertId]);
 }
 
-async function trace<T>(items: ToolTraceItem[], name: string, input: unknown, action: () => Promise<T>): Promise<T> {
+const TOOL_LABELS: Record<string, string> = {
+  get_alert_context: '读取预警、批次与规格上下文',
+  get_batch_measurements: '查询同批次产品检验序列',
+  get_equipment_window: '查询异常时段设备采集数据',
+  get_reference_measurements: '查询同规格正常参考批次',
+  get_metric_definition: '读取指标口径与规格限值',
+};
+
+function summarizeToolOutput(output: unknown): string {
+  if (Array.isArray(output)) return `返回 ${output.length} 条记录`;
+  if (output && typeof output === 'object') return `返回 ${Object.keys(output as Record<string, unknown>).length} 个字段`;
+  return output == null ? '未返回可用数据' : '已返回结果';
+}
+
+async function trace<T>(
+  items: ToolTraceItem[],
+  name: string,
+  input: unknown,
+  reporter: AnalysisProgressReporter | undefined,
+  action: () => Promise<T>
+): Promise<T> {
   const start = Date.now();
-  const output = await action();
-  items.push({ tool: name, input, output, startedAt: new Date(start).toISOString(), durationMs: Date.now() - start });
-  return output;
+  await reportAnalysisProgress(reporter, {
+    stage: 'tool', status: 'running', tool: name,
+    message: TOOL_LABELS[name] || `调用工具 ${name}`,
+    detail: Object.keys((input as Record<string, unknown>) || {}).length ? JSON.stringify(input) : undefined,
+  });
+  try {
+    const output = await action();
+    const durationMs = Date.now() - start;
+    items.push({ tool: name, input, output, startedAt: new Date(start).toISOString(), durationMs });
+    await reportAnalysisProgress(reporter, {
+      stage: 'tool', status: 'success', tool: name,
+      message: `${TOOL_LABELS[name] || name}完成`,
+      detail: `${summarizeToolOutput(output)}，耗时 ${durationMs} ms`,
+    });
+    return output;
+  } catch (error) {
+    await reportAnalysisProgress(reporter, {
+      stage: 'tool', status: 'error', tool: name,
+      message: `${TOOL_LABELS[name] || name}失败`,
+      detail: error instanceof Error ? error.message : '未知错误',
+    });
+    throw error;
+  }
 }
 
 /** 创建只允许访问当前预警上下文的白名单工具，Agent 无法提交任意 SQL 或任意业务ID。 */
-export function createQualityAgentTools(context: AlertAgentContext, traces: ToolTraceItem[]) {
+export function createQualityAgentTools(
+  context: AlertAgentContext,
+  traces: ToolTraceItem[],
+  reporter?: AnalysisProgressReporter
+) {
   const getAlertContext = tool(
-    async () => trace(traces, 'get_alert_context', {}, async () => context),
+    async () => trace(traces, 'get_alert_context', {}, reporter, async () => context),
     {
       name: 'get_alert_context',
       description: '获取当前预警事件、触发记录、生产批次、产品规格和限值。分析必须首先调用。',
@@ -46,7 +90,7 @@ export function createQualityAgentTools(context: AlertAgentContext, traces: Tool
   );
 
   const getBatchMeasurements = tool(
-    async ({ limit }: { limit: number }) => trace(traces, 'get_batch_measurements', { limit }, async () => {
+    async ({ limit }: { limit: number }) => trace(traces, 'get_batch_measurements', { limit }, reporter, async () => {
       const safeLimit = Math.max(3, Math.min(30, limit));
       return dbClient.queryAll<Row>(`SELECT id, record_no, sample_no, inspect_time,
         outer_diameter_mm, min_wall_thickness_mm, max_wall_thickness_mm,
@@ -64,7 +108,7 @@ export function createQualityAgentTools(context: AlertAgentContext, traces: Tool
   );
 
   const getEquipmentWindow = tool(
-    async ({ windowMinutes }: { windowMinutes: number }) => trace(traces, 'get_equipment_window', { windowMinutes }, async () => {
+    async ({ windowMinutes }: { windowMinutes: number }) => trace(traces, 'get_equipment_window', { windowMinutes }, reporter, async () => {
       const safeWindow = Math.max(30, Math.min(1440, windowMinutes));
       return dbClient.queryAll<Row>(`SELECT r.id, r.record_no, r.collect_time, r.temperature_c,
         r.pressure_mpa, r.haul_off_speed_mpm, r.data_source, r.remark,
@@ -83,7 +127,7 @@ export function createQualityAgentTools(context: AlertAgentContext, traces: Tool
   );
 
   const getReferenceMeasurements = tool(
-    async ({ limit }: { limit: number }) => trace(traces, 'get_reference_measurements', { limit }, async () => {
+    async ({ limit }: { limit: number }) => trace(traces, 'get_reference_measurements', { limit }, reporter, async () => {
       const safeLimit = Math.max(3, Math.min(50, limit));
       return dbClient.queryAll<Row>(`SELECT m.id, m.record_no, m.inspect_time,
         m.outer_diameter_mm, m.min_wall_thickness_mm, m.ovality_mm,
@@ -101,7 +145,7 @@ export function createQualityAgentTools(context: AlertAgentContext, traces: Tool
   );
 
   const getMetricDefinition = tool(
-    async () => trace(traces, 'get_metric_definition', {}, async () => {
+    async () => trace(traces, 'get_metric_definition', {}, reporter, async () => {
       const dictionary = await dbClient.queryOne<Row>(
         'SELECT code, name, unit, influences, description FROM ppr_metric WHERE code=?',
         [context.metric_code]

@@ -1,14 +1,20 @@
 import { dbClient } from '@/lib/quality';
 import { loadAlertAgentContext } from './data-tools';
-import type { AnalysisGenerationResult, QualityAnalysisOutput } from './types';
+import { reportAnalysisProgress, type AnalysisGenerationResult, type AnalysisProgressReporter, type QualityAnalysisOutput } from './types';
 
 type Row = Record<string, unknown>;
 const PROMPT_VERSION = 'rule-v2.0';
 
-export async function generateRuleAnalysis(alertId: number, fallbackReason?: string): Promise<AnalysisGenerationResult> {
+export async function generateRuleAnalysis(
+  alertId: number,
+  fallbackReason?: string,
+  reporter?: AnalysisProgressReporter
+): Promise<AnalysisGenerationResult> {
   const startedAt = Date.now();
+  await reportAnalysisProgress(reporter, { stage: 'rule', status: 'running', message: '规则引擎正在读取预警与规格限值' });
   const alert = await loadAlertAgentContext(alertId);
   if (!alert) throw new Error('预警事件不存在');
+  await reportAnalysisProgress(reporter, { stage: 'rule', status: 'running', message: '正在关联同批次产品趋势与同期设备数据' });
   const measurements = await dbClient.queryAll<Row>(`SELECT * FROM ppr_product_measurement
     WHERE batch_id=? AND inspect_time<=? ORDER BY inspect_time DESC LIMIT 5`, [alert.batch_id, alert.inspect_time]);
   const readings = await dbClient.queryAll<Row>(`SELECT r.*, e.name AS equipment_name
@@ -19,6 +25,10 @@ export async function generateRuleAnalysis(alertId: number, fallbackReason?: str
   const key = valueMap[metric] || 'outer_diameter_mm';
   const values = measurements.map((item) => Number(item[key])).filter(Number.isFinite).reverse();
   const delta = values.length > 1 ? values.at(-1)! - values[0] : 0;
+  await reportAnalysisProgress(reporter, {
+    stage: 'rule', status: 'success', message: '证据关联完成',
+    detail: `产品记录 ${measurements.length} 条，设备记录 ${readings.length} 条`,
+  });
   const output: QualityAnalysisOutput = {
     summary: `${alert.event_no} 在批次 ${alert.batch_no} 触发“${alert.rule_name}”。规则引擎已关联同批次检验与同期设备数据，以下内容均为待工程师验证的排查线索。`,
     riskAssessment: { level: String(alert.risk_level) as QualityAnalysisOutput['riskAssessment']['level'], reason: String(alert.threshold_text || alert.rule_name) },
@@ -53,6 +63,7 @@ export async function generateRuleAnalysis(alertId: number, fallbackReason?: str
     ],
     analysisLimitations: ['规则参数和限值为演示配置', '没有计算因果关系', '最终根因和产品处置必须由工程师确认'],
   };
+  await reportAnalysisProgress(reporter, { stage: 'validation', status: 'success', message: `规则分析完成，生成 ${output.conclusions.length} 条待验证结论` });
   return {
     output,
     evidenceSnapshot: { alert, measurements: measurements.slice().reverse(), readings },

@@ -18,6 +18,45 @@ type Row = Record<string, unknown>;
 type AnalysisMode = 'rule' | 'agent';
 type AgentStatus = { mode: AnalysisMode; configured: boolean; model: string; fallbackToRule: boolean; framework: string };
 
+/** 诊断页只处理异常事件：risk_level='normal' 的正常记录不进入诊断流程（与监控页「进入诊断」入口一致）。 */
+const isAbnormalAlert = (row: Row) => String(row.risk_level) !== 'normal';
+
+const riskLabels: Record<string, string> = { normal: '正常', medium: '中风险', high: '高风险', error: '数据核对' };
+const riskStyles: Record<string, string> = {
+  normal: 'bg-emerald-50 text-emerald-700',
+  medium: 'bg-amber-50 text-amber-700',
+  high: 'bg-red-50 text-red-700',
+  error: 'bg-violet-50 text-violet-700',
+};
+/** 事件里的限值字段按指标取值，与判定引擎 resolveRange 的口径一致（不圆度没有下限列，按 0 处理）。 */
+const limitColumns: Record<string, { lower?: string; upper: string }> = {
+  outer_diameter: { lower: 'outer_lower_mm', upper: 'outer_upper_mm' },
+  min_wall_thickness: { lower: 'wall_lower_mm', upper: 'wall_upper_mm' },
+  ovality: { upper: 'ovality_upper_mm' },
+};
+
+const toNumber = (value: unknown) => {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+/** 把预警事件的限值整理成「标准区间 / 实测值 / 偏差」，供诊断页的判定依据卡片展示。 */
+function ruleBreakdown(row: Row) {
+  const config = limitColumns[String(row.metric_code ?? '')];
+  const upper = config ? toNumber(row[config.upper]) : null;
+  const lower = config ? (config.lower ? toNumber(row[config.lower]) ?? 0 : 0) : null;
+  const observed = toNumber(row.observed_value);
+  const interval = upper === null ? '限值待确认' : lower === null ? `≤ ${upper.toFixed(3)} mm` : `${lower.toFixed(3)} mm–${upper.toFixed(3)} mm`;
+  let deviation = '—';
+  if (observed !== null && upper !== null && lower !== null) {
+    if (observed > upper) deviation = `高于上限 ${(observed - upper).toFixed(3)} mm`;
+    else if (observed < lower) deviation = `低于下限 ${(lower - observed).toFixed(3)} mm`;
+    else deviation = '落在标准区间内';
+  }
+  return { interval, observed, deviation };
+}
+
 const decisionLabels: Record<string, string> = { pending: '待验证', confirmed: '已确认', rejected: '已驳回' };
 const decisionStyles: Record<string, string> = {
   pending: 'bg-amber-50 text-amber-700',
@@ -40,9 +79,14 @@ export function DiagnosisClient() {
     const response = await fetch('/api/quality/dashboard');
     const json = await response.json();
     if (response.ok) {
-      setAlerts(json.alerts || []);
+      const list: Row[] = json.alerts || [];
+      setAlerts(list);
       setMeasurements(json.measurements || []);
-      if (!alertId && json.alerts?.[0]) setAlertId(String(json.alerts[0].id));
+      // 默认选中第一条异常事件；正常记录不允许出现在诊断页的下拉里。
+      if (!alertId) {
+        const firstAbnormal = list.find(isAbnormalAlert);
+        if (firstAbnormal) setAlertId(String(firstAbnormal.id));
+      }
     }
   }, [alertId]);
 
@@ -123,6 +167,10 @@ export function DiagnosisClient() {
   } : state);
 
   const selected = alerts.find((item) => String(item.id) === alertId);
+  /** 下拉候选只保留中/高风险事件（risk_level ≠ normal）。 */
+  const abnormalAlerts = alerts.filter(isAbnormalAlert);
+  const normalAlertCount = alerts.length - abnormalAlerts.length;
+  const breakdown = selected ? ruleBreakdown(selected) : null;
   const engineType = String(analysis?.engine_type || 'rule');
 
   return <>
@@ -135,9 +183,12 @@ export function DiagnosisClient() {
     <Card className="mb-5 border-slate-200 shadow-sm">
       <CardContent className="flex flex-wrap items-center gap-3 p-4">
         <Select value={alertId} onValueChange={setAlertId}>
-          <SelectTrigger className="w-full max-w-xl"><SelectValue placeholder="选择预警事件" /></SelectTrigger>
-          <SelectContent>{alerts.map((item) => <SelectItem key={String(item.id)} value={String(item.id)}>{String(item.event_no)} · {String(item.batch_no)} · {String(item.rule_name)}</SelectItem>)}</SelectContent>
+          <SelectTrigger className="w-full max-w-xl"><SelectValue placeholder={abnormalAlerts.length ? '选择异常事件' : '暂无可诊断的异常事件'} /></SelectTrigger>
+          <SelectContent>{abnormalAlerts.length
+            ? abnormalAlerts.map((item) => <SelectItem key={String(item.id)} value={String(item.id)}>{String(item.event_no)} · {String(item.batch_no)} · {String(item.rule_name)}</SelectItem>)
+            : <SelectItem value="__none__" disabled>暂无可诊断的异常事件</SelectItem>}</SelectContent>
         </Select>
+        <span className="text-xs text-slate-500">仅可选异常批次事件（中 / 高风险）{normalAlertCount > 0 ? `，已过滤 ${normalAlertCount} 条正常记录` : ''}</span>
         <Select value={mode} onValueChange={(value) => setMode(value as AnalysisMode)}>
           <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -162,6 +213,16 @@ export function DiagnosisClient() {
       {[['预警事件', selected.event_no], ['生产批次', selected.batch_no], ['触发规则', `${selected.rule_code} · ${selected.rule_name}`], ['观测值', `${selected.observed_value ?? '—'} mm`]].map(([label, value]) =>
         <Card key={String(label)} className="border-slate-200 shadow-sm"><CardContent className="p-4"><span className="text-xs text-slate-500">{String(label)}</span><b className="mt-1 block text-sm text-slate-900">{String(value)}</b></CardContent></Card>)}
     </div>}
+
+    {/* 判定依据（原监控页「判定规则」列里的限值文字）：标准区间、实测值与偏差在这里展开，不再挤在队列表格里。 */}
+    {selected && breakdown && <Card className="mb-5 border-amber-200 bg-amber-50/50 shadow-sm">
+      <CardHeader className="border-b border-amber-100 pb-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><CardTitle className="text-base">判定依据 · 限值对照</CardTitle><p className="mt-1 text-xs text-slate-500">{String(selected.event_no)} · {String(selected.batch_no)} · 产品规格 {String(selected.spec_name ?? '—')}；限值取自规格标准区间</p></div><Badge className={riskStyles[String(selected.risk_level)]}>{riskLabels[String(selected.risk_level)] ?? String(selected.risk_level)}</Badge></div></CardHeader>
+      <CardContent className="grid gap-4 p-5 sm:grid-cols-2 xl:grid-cols-4">
+        {[['标准区间', breakdown.interval], ['实测值', breakdown.observed === null ? '无数据' : `${breakdown.observed.toFixed(3)} mm`], ['偏差', breakdown.deviation], ['判定规则', `${String(selected.rule_code)} · ${String(selected.rule_name)}`]].map(([label, value]) =>
+          <div key={label} className="rounded-lg border border-amber-100 bg-white p-3"><span className="text-xs text-slate-500">{label}</span><b className="mt-1 block font-mono text-sm text-slate-900">{value}</b></div>)}
+      </CardContent>
+      <div className="border-t border-amber-100 px-5 py-3 text-xs text-slate-600">判定说明：{String(selected.threshold_text || '—')}</div>
+    </Card>}
 
     {/* 趋势图跟随所选事件：key 绑定事件 id，切换事件即重置视图并自动定位到该事件的异常指标、规格与批次。 */}
     {selected && <MetricTrendCard key={alertId} measurements={measurements} focus={{ metricCode: String(selected.metric_code ?? ''), specName: String(selected.spec_name ?? ''), batchNo: String(selected.batch_no ?? '') }} />}

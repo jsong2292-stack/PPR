@@ -21,7 +21,9 @@
 - **数据源管理**：批次基础信息、质量指标与影响因素、产品检验数据、设备采集数据
 - **数据维护**：列表检索、新增、编辑、删除、CSV 模板下载、Excel/CSV 批量导入
 - **监控预警**：质量指标趋势、规格演示限值、预警队列、产品数据重新扫描
-- **异常诊断**：自动关联同批次产品记录和同期设备数据，生成限值、趋势和设备因素三层证据
+- **双模式异常诊断**：可选择确定性规则引擎或 LangChain Agent，并支持运行时配置切换
+- **LangChain Agent**：通过白名单只读工具自主获取预警、批次趋势、设备窗口、参考批次和指标定义，输出结构化结论
+- **自动降级**：Agent 未配置、超时或调用失败时可自动回退规则引擎，业务流程不中断
 - **工程师验证**：逐条确认/驳回分析结论，记录实际发现和工程师意见
 - **8D 工作台**：继承事件与已确认结论，编辑 D1-D8、保存草稿、完整性检查、定稿、HTML 导出和浏览器打印
 - **历史分析**：报告定稿后自动关闭预警、完成分析并生成历史归档
@@ -33,6 +35,8 @@
 - Next.js 16 App Router + React 19 + TypeScript
 - Tailwind CSS 4 + shadcn/ui + Lucide Icons
 - Recharts
+- LangChain `createAgent` + LangGraph + `@langchain/openai`
+- OpenAI Responses API / OpenAI兼容接口（可配置）
 - MySQL 8 + `mysql2` 原生 SQL
 - JWT + bcryptjs
 - SheetJS (`xlsx`) Excel 导入
@@ -99,6 +103,45 @@ pnpm dev
 
 生产部署前必须修改默认密码和 `JWT_SECRET`；启用 HTTPS 后将 `SESSION_COOKIE_SECURE` 设为 `true`。
 
+### 4. 可选：启用 LangChain Agent
+
+默认使用规则引擎，不需要任何模型密钥。要启用 Agent，在 `.env.local` 配置：
+
+```bash
+QUALITY_AGENT_API_KEY=your-api-key
+QUALITY_AGENT_MODEL=gpt-6-luna
+# 使用OpenAI兼容网关时填写
+QUALITY_AGENT_BASE_URL=
+QUALITY_AGENT_USE_RESPONSES_API=true
+QUALITY_AGENT_FALLBACK_TO_RULE=true
+```
+
+然后进入：
+
+```text
+管理后台 → 系统设置 → 质量 Agent
+```
+
+开启“使用 LangChain Agent”。API 密钥只从环境变量读取，不会写入数据库。诊断页面也允许针对单次分析选择“规则引擎模式”或“LangChain Agent”。
+
+如果兼容网关不支持 Responses API，可设置：
+
+```bash
+QUALITY_AGENT_USE_RESPONSES_API=false
+```
+
+Agent 模式提供以下受限只读工具：
+
+```text
+get_alert_context
+get_batch_measurements
+get_equipment_window
+get_reference_measurements
+get_metric_definition
+```
+
+模型无法提交任意 SQL，也不能查询当前预警范围之外的任意批次。
+
 ## Docker Compose 启动
 
 ```bash
@@ -146,7 +189,8 @@ docker compose up -d --build
 | `/api/quality/master/[resource]` | GET/POST/PUT/DELETE | 8 类主数据和数据源通用 CRUD |
 | `/api/quality/dashboard` | GET | 监控统计、趋势、预警、产品和设备数据 |
 | `/api/quality/alerts/evaluate` | POST | 按规格演示限值重新扫描产品数据 |
-| `/api/quality/analysis` | GET/POST/PUT | 查询/生成分析、保存工程师验证 |
+| `/api/quality/analysis` | GET/POST/PUT | 按规则或Agent模式生成分析、保存工程师验证 |
+| `/api/quality/agent/status` | GET | 查询当前模式、模型、密钥配置和降级策略 |
 | `/api/quality/reports` | GET/POST/PUT | 创建、编辑、定稿 8D 报告 |
 | `/api/quality/history` | GET | 查询定稿后的历史归档 |
 
@@ -155,7 +199,7 @@ docker compose up -d --build
 1. 在系统管理中维护产品、规格、设备。
 2. 在数据源管理中维护批次、产品检验和设备采集记录。
 3. 监控页读取同一数据库中的产品数据；点击“重新扫描”可为新增超限记录创建预警。
-4. 诊断页以 `alert_id` 为入口，按 `batch_id + inspect_time` 关联产品趋势和设备数据，并保存证据快照。
+4. 诊断页以 `alert_id` 为入口：规则模式直接执行确定性查询；Agent模式由 LangChain `createAgent` 自主选择白名单工具，并以 Zod Schema 输出结构化分析。
 5. 工程师逐条确认或驳回结论，验证结果实时写入 `ppr_analysis_conclusion`。
 6. 8D 工作台从分析任务继承事件、摘要和已确认结论。
 7. 定稿时在同一流程内更新报告、关闭预警、完成分析，并写入 `ppr_history_archive`。
@@ -169,6 +213,7 @@ src/
 ├── components/quality/              # 业务组件
 ├── components/ui/                   # 平台 shadcn/ui 组件
 ├── lib/quality.ts                   # 资源白名单、业务公共方法
+├── lib/quality-analysis/            # 规则引擎、LangChain Agent、工具与双模式编排
 ├── lib/auth.ts                      # 平台认证
 └── storage/database/mysql-client.ts # MySQL 连接池与事务
 scripts/
@@ -177,6 +222,25 @@ scripts/
 ├── reset-db.sql                     # 开发环境重置
 └── cdp-shot.mjs                     # 本地页面截图验收工具
 ```
+
+
+## 异常诊断双模式
+
+| 模式 | 特点 | 是否需要模型密钥 |
+|---|---|---|
+| `rule` | 确定性规则、固定证据层次、低延迟、可完全离线 | 否 |
+| `agent` | LangChain Agent 自主调用数据工具、结构化推理、可扩展知识库 | 是 |
+
+模式优先级：诊断页面单次选择 > `system_config.quality_analysis_mode` > `QUALITY_ANALYSIS_MODE`。
+
+每次分析都会记录：
+
+- `engine_type`：实际执行的是规则还是Agent
+- `model_name`、`prompt_version`、`agent_version`
+- `tool_trace_json`：Agent工具调用及证据
+- `token_usage_json`、`raw_response_json`、`latency_ms`
+- `fallback_reason`：Agent降级原因
+- 每条结论的置信度、证据来源和工程师修改标记
 
 ## 验证命令
 

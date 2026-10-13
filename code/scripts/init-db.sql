@@ -36,7 +36,12 @@ INSERT INTO system_config (`key`, value, description) VALUES
   ('enable_file_upload', 'true', '是否开放文件上传（true/false）'),
   ('enable_file_preview', 'true', '是否启用文件在线预览（true/false）'),
   ('max_file_size', '500', '文件上传大小上限（MB）'),
-  ('enable_sso_auto_login', 'false', '未登录时是否自动跳转单点登录（true/false）')
+  ('enable_sso_auto_login', 'false', '未登录时是否自动跳转单点登录（true/false）'),
+  ('quality_analysis_mode', 'rule', '异常诊断模式：rule规则引擎、agent LangChain智能体'),
+  ('quality_agent_model', 'gpt-6-luna', 'LangChain Agent使用的模型名称'),
+  ('quality_agent_fallback_to_rule', 'true', 'Agent失败或未配置密钥时是否自动降级规则引擎'),
+  ('quality_agent_max_tool_rounds', '8', 'Agent单次分析最大工具调用轮数'),
+  ('quality_agent_reasoning_effort', 'low', 'Agent推理强度：none/minimal/low/medium/high')
 ON DUPLICATE KEY UPDATE `key` = `key`;
 
 -- ==========================================
@@ -391,6 +396,15 @@ CREATE TABLE IF NOT EXISTS ppr_analysis_run (
   status ENUM('generated','reviewing','completed') NOT NULL DEFAULT 'generated' COMMENT '分析状态：已生成、复核中、已完成',
   summary TEXT NOT NULL COMMENT '分析摘要',
   evidence_snapshot JSON NULL COMMENT '生成时使用的产品、设备、限值和趋势证据快照',
+  engine_type ENUM('rule','agent') NOT NULL DEFAULT 'rule' COMMENT '分析引擎：规则引擎或LangChain Agent',
+  model_name VARCHAR(100) NULL COMMENT 'Agent模式实际使用的模型名称',
+  prompt_version VARCHAR(64) NULL COMMENT '规则模板或Agent提示词版本',
+  agent_version VARCHAR(64) NULL COMMENT 'Agent编排实现版本',
+  tool_trace_json JSON NULL COMMENT 'Agent工具调用轨迹及返回证据',
+  token_usage_json JSON NULL COMMENT '模型Token使用统计',
+  raw_response_json JSON NULL COMMENT '模型原始消息的可审计快照',
+  latency_ms INT UNSIGNED NULL COMMENT '本次分析总耗时，单位毫秒',
+  fallback_reason TEXT NULL COMMENT 'Agent降级到规则引擎的原因',
   generated_by VARCHAR(100) NULL COMMENT '分析发起人名称或账号',
   generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '分析生成时间',
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -410,6 +424,10 @@ CREATE TABLE IF NOT EXISTS ppr_analysis_conclusion (
   evidence TEXT NULL COMMENT '支持证据说明',
   missing_evidence TEXT NULL COMMENT '缺失证据说明',
   validation_action TEXT NULL COMMENT '建议验证动作',
+  confidence DECIMAL(5,4) NULL COMMENT '证据完备度置信分，0到1，不代表根因概率',
+  evidence_source_ids JSON NULL COMMENT '本结论引用的产品、设备或事件业务编号',
+  generated_by_model VARCHAR(100) NULL COMMENT '生成本结论的模型名称，规则模式为空',
+  engineer_modified TINYINT(1) NOT NULL DEFAULT 0 COMMENT '工程师是否修改或补充过本结论',
   engineer_decision ENUM('pending','confirmed','rejected') NOT NULL DEFAULT 'pending' COMMENT '工程师判定：待处理、已确认、已驳回',
   engineer_comment TEXT NULL COMMENT '工程师意见',
   actual_finding TEXT NULL COMMENT '现场验证实际发现',

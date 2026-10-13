@@ -14,6 +14,8 @@ import { PageHeader } from './PageHeader';
 
 export type Field = { key: string; label: string; type?: 'text'|'number'|'datetime'|'textarea'|'select'; required?: boolean; options?: { label: string; value: string }[]; optionResource?: string; optionLabel?: string };
 export type Column = { key: string; label: string; render?: (row: Record<string, unknown>) => React.ReactNode };
+/** 只出现在 Excel 模板里、不出现在页面表单上的列（例如产品数据的「批次号」）。replaces 指向它替代的表单字段，该字段不进模板。 */
+export type TemplateColumn = { key: string; label: string; note?: string; required?: boolean; replaces?: string };
 
 function displayCell(key: string, value: unknown) {
   if (value == null || value === '') return '—';
@@ -21,7 +23,7 @@ function displayCell(key: string, value: unknown) {
   return String(value);
 }
 
-export function DataManager({ resource, title, description, fields, columns, excel = true }: { resource: string; title: string; description: string; fields: Field[]; columns: Column[]; excel?: boolean }) {
+export function DataManager({ resource, title, description, fields, columns, excel = true, templateColumns = [], templateNotes = [], templateSample }: { resource: string; title: string; description: string; fields: Field[]; columns: Column[]; excel?: boolean; templateColumns?: TemplateColumn[]; templateNotes?: string[]; templateSample?: Record<string, string | number> }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -65,10 +67,17 @@ export function DataManager({ resource, title, description, fields, columns, exc
     const res = await fetch(`/api/quality/master/${resource}?id=${row.id}`, { method: 'DELETE' }); const json = await res.json();
     if (!res.ok) return toast.error(json.error || '删除失败'); toast.success('数据已删除'); load();
   };
-  const downloadTemplate = () => {
-    const content = `${fields.map((field) => field.key).join(',')}\n${fields.map(() => '').join(',')}`;
-    const url = URL.createObjectURL(new Blob(['\ufeff' + content], { type: 'text/csv;charset=utf-8' }));
-    const link = document.createElement('a'); link.href = url; link.download = `${resource}-template.csv`; link.click(); URL.revokeObjectURL(url);
+  /**
+   * 下载导入模板：第一个工作表是纯数据表（导入只读第一个表），第二个「填写说明」放中文含义、
+   * 必填、示例值和注意事项。列的组装与校验集中在 src/lib/quality-template.ts。
+   */
+  const downloadTemplate = async () => {
+    try {
+      const { writeImportTemplate } = await import('@/lib/quality-template');
+      const buffer = writeImportTemplate({ resource, sheetName: title || resource, fields, templateColumns, notes: templateNotes, sample: templateSample });
+      const url = URL.createObjectURL(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+      const link = document.createElement('a'); link.href = url; link.download = `${resource}-import-template.xlsx`; link.click(); URL.revokeObjectURL(url);
+    } catch (error) { toast.error(error instanceof Error ? error.message : '模板生成失败'); }
   };
   const importFile = async (file?: File) => {
     if (!file) return;
@@ -76,19 +85,41 @@ export function DataManager({ resource, title, description, fields, columns, exc
       const XLSX = await import('xlsx'); const buffer = await file.arrayBuffer(); const workbook = XLSX.read(buffer); const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
       if (!data.length) throw new Error('文件中没有可导入数据');
-      let ok = 0;
-      for (const row of data) {
+      let ok = 0; let newBatches = 0;
+      const flagged = { high: 0, medium: 0 };
+      const failures: string[] = [];
+      for (const [index, row] of data.entries()) {
         const res = await fetch(`/api/quality/master/${resource}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(row) });
-        if (res.ok) ok += 1;
+        if (!res.ok) {
+          // 之前是把失败行静默丢掉，只报「成功 N / M」，用户根本不知道哪行错了。
+          const json = await res.json().catch(() => null);
+          if (failures.length < 3) failures.push(`第 ${index + 2} 行：${json?.error ?? `HTTP ${res.status}`}`);
+          continue;
+        }
+        ok += 1;
+        // 产品数据保存后服务端会自动重算预警，这里把高风险/中风险条数汇总给用户。
+        const json = await res.json().catch(() => null);
+        const summary = json?.alerts as { high?: number; medium?: number } | null;
+        if (summary) { flagged.high += summary.high ?? 0; flagged.medium += summary.medium ?? 0; }
+        if (json?.batch?.created) newBatches += 1;
       }
-      toast.success(`导入完成：成功 ${ok} / ${data.length} 条`); await load();
+      const triggered = flagged.high + flagged.medium;
+      const details = [
+        newBatches ? `自动新建批次 ${newBatches} 个` : '',
+        triggered ? `自动预警：高风险 ${flagged.high} 条，中风险 ${flagged.medium} 条` : '',
+        failures.length ? `${data.length - ok} 行失败 → ${failures.join('；')}` : '',
+      ].filter(Boolean).join(' ｜ ');
+      const message = `导入完成：成功 ${ok} / ${data.length} 条`;
+      if (failures.length) toast.warning(message, { description: details, duration: 12000 });
+      else toast.success(message, details ? { description: details, duration: 8000 } : undefined);
+      await load();
     } catch (error) { toast.error(error instanceof Error ? error.message : '导入失败'); }
   };
 
   return <>
     <PageHeader title={title} description={description} actions={<>
       {excel && <>
-        <Button variant="outline" onClick={downloadTemplate}><Download size={16} />下载模板</Button>
+        <Button variant="outline" onClick={() => { void downloadTemplate(); }}><Download size={16} />下载模板</Button>
         <Button variant="outline" asChild><label className="cursor-pointer"><Upload size={16} />Excel 导入<input className="hidden" type="file" accept=".xlsx,.xls,.csv" onChange={(event) => { importFile(event.target.files?.[0]); event.target.value=''; }} /></label></Button>
       </>}
       <Button onClick={() => showEditor()} className="bg-blue-700 hover:bg-blue-800"><Plus size={16} />新增</Button>

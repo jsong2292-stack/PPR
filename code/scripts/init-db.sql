@@ -366,7 +366,7 @@ CREATE TABLE IF NOT EXISTS ppr_equipment_reading (
   CONSTRAINT fk_ppr_reading_equipment FOREIGN KEY (equipment_id) REFERENCES ppr_equipment(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PPR设备工艺参数采集数据';
 
--- 质量预警事件：由扫描规则从产品数据中产生，是后续诊断的入口。
+-- 质量预警事件：由预警判定引擎按产品规格的标准区间自动产生，是后续诊断的入口。
 CREATE TABLE IF NOT EXISTS ppr_alert_event (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键，自增编号',
   event_no VARCHAR(64) NOT NULL COMMENT '预警事件编号，全局唯一',
@@ -378,6 +378,7 @@ CREATE TABLE IF NOT EXISTS ppr_alert_event (
   observed_value DECIMAL(12,4) NULL COMMENT '触发时的观测值',
   threshold_text VARCHAR(200) NULL COMMENT '触发阈值文本快照',
   status ENUM('open','analyzing','closed') NOT NULL DEFAULT 'open' COMMENT '事件状态：待分析、分析中、已关闭',
+  source ENUM('engine','legacy') NOT NULL DEFAULT 'engine' COMMENT '事件来源：engine=判定引擎生成，legacy=历史演示或人工遗留',
   detected_at DATETIME NOT NULL COMMENT '预警识别时间',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -528,8 +529,8 @@ ON DUPLICATE KEY UPDATE name=VALUES(name), unit=VALUES(unit), influences=VALUES(
 INSERT INTO ppr_product_measurement (id, record_no, sample_no, batch_id, inspect_time, outer_diameter_mm, min_wall_thickness_mm, max_wall_thickness_mm, max_outer_diameter_mm, min_outer_diameter_mm, ovality_mm, data_source, quality_flag, remark) VALUES
   (1, 'IR-20261010-001', 'S-001', 1, '2026-10-10 08:20:00', 25.230, 4.320, 4.430, 25.310, 25.120, 0.190, 'QMS', 'normal', '基线点'),
   (2, 'IR-20261010-002', 'S-002', 1, '2026-10-10 09:05:00', 25.240, 4.290, 4.410, 25.330, 25.110, 0.220, 'QMS', 'medium', '壁厚呈下降趋势'),
-  (3, 'IR-20261010-003', 'S-003', 1, '2026-10-10 09:37:00', 25.250, 4.260, 4.390, 25.350, 25.100, 0.250, 'QMS', 'medium', '连续趋势触发'),
-  (4, 'IR-20261010-004', 'S-004', 1, '2026-10-10 10:15:00', 25.260, 4.310, 4.420, 25.360, 25.120, 0.240, 'QMS', 'normal', '趋势恢复'),
+  (3, 'IR-20261010-003', 'S-003', 1, '2026-10-10 09:37:00', 25.250, 4.260, 4.390, 25.350, 25.100, 0.250, 'QMS', 'medium', '壁厚趋近下限'),
+  (4, 'IR-20261010-004', 'S-004', 1, '2026-10-10 10:15:00', 25.260, 4.270, 4.420, 25.360, 25.120, 0.240, 'QMS', 'medium', '连续3点趋近下限，未越限'),
   (5, 'IR-20261011-001', 'S-101', 2, '2026-10-11 08:00:00', 25.220, 4.340, 4.460, 25.320, 25.100, 0.220, 'QMS', 'normal', '参考批次'),
   (6, 'IR-20261011-002', 'S-102', 2, '2026-10-11 09:00:00', 25.230, 4.330, 4.450, 25.550, 25.120, 0.430, 'QMS', 'high', '不圆度超过演示上限'),
   (7, 'IR-20261011-003', 'S-103', 2, '2026-10-11 10:00:00', 25.240, 4.350, 4.470, 25.340, 25.110, 0.230, 'QMS', 'normal', '恢复正常'),
@@ -555,9 +556,8 @@ INSERT INTO ppr_equipment_reading (id, record_no, batch_id, equipment_id, collec
   (8, 'ER-20261012-2000', 4, 1, '2026-10-12 20:00:00', 203.00, 11.800, 7.900, 'SCADA', '换规格后首件')
 ON DUPLICATE KEY UPDATE batch_id=VALUES(batch_id), equipment_id=VALUES(equipment_id), collect_time=VALUES(collect_time), temperature_c=VALUES(temperature_c), pressure_mpa=VALUES(pressure_mpa), haul_off_speed_mpm=VALUES(haul_off_speed_mpm), remark=VALUES(remark);
 
-INSERT INTO ppr_alert_event (id, event_no, measurement_id, metric_code, risk_level, rule_code, rule_name, observed_value, threshold_text, status, detected_at) VALUES
-  (1, 'QE-20261010-001', 3, 'min_wall_thickness', 'medium', 'R4', '待复核趋势', 4.2600, '连续3个可比较点下降，规则参数待现场验证', 'open', '2026-10-10 09:38:00'),
-  (2, 'QE-20261011-001', 6, 'ovality', 'high', 'R3', '不圆度演示限值对照', 0.4300, '演示上限0.350 mm，正式标准待确认', 'open', '2026-10-11 09:01:00'),
-  (3, 'QE-20261010-002', 4, 'min_wall_thickness', 'error', 'R1', 'QMS/MES数据不一致待核对', 4.3100, '来源差值0.080 mm，大于演示容差0.050 mm', 'open', '2026-10-10 10:16:00'),
-  (4, 'QE-20261012-001', 16, 'outer_diameter', 'error', 'R2', '疑似跨规格录入', 25.1800, '批次规格20×3.4但记录值接近25 mm', 'open', '2026-10-12 20:01:00')
-ON DUPLICATE KEY UPDATE measurement_id=VALUES(measurement_id), metric_code=VALUES(metric_code), risk_level=VALUES(risk_level), rule_name=VALUES(rule_name), observed_value=VALUES(observed_value), threshold_text=VALUES(threshold_text), status=VALUES(status), detected_at=VALUES(detected_at);
+-- 预警事件不预置演示数据：ppr_alert_event 全部由预警判定引擎在导入 / 新增 / 编辑产品数据时自动生成。
+-- 判定逻辑见 code/src/lib/quality-analysis/alert-engine.ts：
+--   R3 超出产品规格标准区间              → 高风险
+--   R5 连续 3 点进入接近带（区间宽 15%）  → 中风险
+--   R0 落在标准区间内                    → 正常（状态直接置为 closed，不占待处理队列）

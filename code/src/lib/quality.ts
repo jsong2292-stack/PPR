@@ -73,7 +73,8 @@ export const RESOURCE_CONFIG: Record<MasterResource, ResourceConfig> = {
   measurements: {
     table: 'ppr_product_measurement',
     columns: ['record_no', 'sample_no', 'batch_id', 'inspect_time', 'outer_diameter_mm', 'min_wall_thickness_mm', 'max_wall_thickness_mm', 'max_outer_diameter_mm', 'min_outer_diameter_mm', 'ovality_mm', 'data_source', 'quality_flag', 'remark'],
-    required: ['record_no', 'sample_no', 'batch_id', 'inspect_time'],
+    // batch_id 不在这里：Excel 导入可以用 batch_no 代替，由 resolveMeasurementBatch 统一解析。
+    required: ['record_no', 'sample_no', 'inspect_time'],
     orderBy: 'm.inspect_time DESC',
     listSql: `SELECT m.*, b.batch_no, s.name AS spec_name FROM ppr_product_measurement m
       JOIN ppr_batch b ON b.id=m.batch_id JOIN ppr_product_spec s ON s.id=b.spec_id

@@ -1,0 +1,11 @@
+# pnpm 构建脚本白名单（pnpm 10+ 从 package.json 迁移到此文件）
+# esbuild / tsup 打包需要，sharp 供 Next.js 图片优化使用
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+  - unrs-resolver

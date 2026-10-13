@@ -1,0 +1,83 @@
+# ==========================================
+# 通用平台脚手架 - Docker Compose 编排
+# ==========================================
+# 使用：
+#   1. 复制 .env.example 为 .env 并填写 JWT_SECRET 等
+#   2. docker compose up -d --build
+#   3. 打开 http://localhost:9010/install 完成初始化
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ppr-quality-app
+    restart: unless-stopped
+    ports:
+      - "9010:9010"
+    environment:
+      NODE_ENV: production
+      PORT: 9010
+      HOSTNAME: 0.0.0.0
+      MYSQL_URL: ${MYSQL_URL:-mysql://root:root@mysql:3306/ppr_quality}
+      JWT_SECRET: ${JWT_SECRET:?请在 .env 中配置 JWT_SECRET}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:9010}
+      MAX_FILE_SIZE: ${MAX_FILE_SIZE:-500}
+      FILE_STORAGE_DRIVER: ${FILE_STORAGE_DRIVER:-auto}
+      UPLOAD_BASE_PATH: ${UPLOAD_BASE_PATH:-}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-}
+      MINIO_BUCKET: ${MINIO_BUCKET:-}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      MINIO_FORCE_PATH_STYLE: ${MINIO_FORCE_PATH_STYLE:-true}
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-}
+      MINIO_PRESIGNED_URL_TTL_SECONDS: ${MINIO_PRESIGNED_URL_TTL_SECONDS:-900}
+      OAUTH_PROVIDER_NAME: ${OAUTH_PROVIDER_NAME:-}
+      OAUTH_PROVIDER_DISPLAY_NAME: ${OAUTH_PROVIDER_DISPLAY_NAME:-}
+      OAUTH_PROVIDER_ICON: ${OAUTH_PROVIDER_ICON:-}
+      OAUTH_AUTH_URL: ${OAUTH_AUTH_URL:-}
+      OAUTH_TOKEN_URL: ${OAUTH_TOKEN_URL:-}
+      OAUTH_USER_INFO_URL: ${OAUTH_USER_INFO_URL:-}
+      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-}
+      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:-}
+      OAUTH_REDIRECT_URI: ${OAUTH_REDIRECT_URI:-}
+    volumes:
+      # 本地存储模式下的上传文件持久化
+      - uploads_data:/app/public/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:9010/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  mysql:
+    image: mysql:8.4
+    container_name: ppr-quality-mysql
+    restart: unless-stopped
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ppr_quality}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # 首次启动自动建表（脚本在 MYSQL_DATABASE 指定的库中执行）
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysql_data:
+  uploads_data:

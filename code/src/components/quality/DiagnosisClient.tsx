@@ -12,7 +12,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { AnalysisProcessPanel, type AnalysisProcessEvent } from './AnalysisProcessPanel';
-import { MetricTrendCard } from './MetricTrendCard';
+import { EquipmentProcessTrendCard } from './EquipmentProcessTrendCard';
+import { MetricTrendCard, metricLabels } from './MetricTrendCard';
 import { PageHeader } from './PageHeader';
 
 type Row = Record<string, unknown>;
@@ -287,6 +288,15 @@ export function DiagnosisClient() {
 
     {/* 趋势图跟随所选事件：key 绑定事件 id，切换事件即重置视图并自动定位到该事件的异常指标、规格与批次。 */}
     {selected && <MetricTrendCard key={alertId} measurements={measurements} focus={{ metricCode: String(selected.metric_code ?? ''), specName: String(selected.spec_name ?? ''), batchNo: String(selected.batch_no ?? '') }} />}
+
+    {/* 设备参数图跟随「批次」而不是「事件」：同批次切换事件时不重新取数，只移动异常时刻标线。 */}
+    {selected && <EquipmentProcessTrendCard
+      key={`equipment-${String(selected.batch_id ?? selected.batch_no ?? '')}`}
+      batchId={toNumber(selected.batch_id)}
+      batchNo={String(selected.batch_no ?? '')}
+      alertTime={String(selected.inspect_time ?? '')}
+      alertMetricLabel={metricLabels[String(selected.metric_code ?? '')]}
+    />}
 
     {loading ? <div className="grid h-64 place-items-center"><Loader2 className="animate-spin text-blue-700" /></div> : !analysis ?
       <Card className="border-dashed border-slate-300"><CardContent className="grid h-64 place-items-center text-center"><div><Bot className="mx-auto mb-3 text-slate-400" /><b>尚未生成诊断分析</b><p className="mt-1 text-sm text-slate-500">选择模式后生成分析，系统会保存证据、工具轨迹和待验证结论。</p></div></CardContent></Card> : <>

@@ -10,7 +10,7 @@ export async function GET() {
     const [alerts, measurements, stats] = await Promise.all([
       // 只取判定引擎产出的事件（source='engine'）；legacy 是历史演示行，仅用于维持归档报告的追溯链。
       dbClient.queryAll(`SELECT a.*, m.record_no, m.sample_no, m.inspect_time, m.outer_diameter_mm,
-        m.min_wall_thickness_mm, m.ovality_mm, m.data_source, b.batch_no, b.production_group,
+        m.min_wall_thickness_mm, m.ovality_mm, m.data_source, b.batch_no, b.id AS batch_id, b.production_group,
         s.name AS spec_name, s.outer_lower_mm, s.outer_upper_mm, s.wall_lower_mm, s.wall_upper_mm, s.ovality_upper_mm
         FROM ppr_alert_event a JOIN ppr_product_measurement m ON m.id=a.measurement_id
         JOIN ppr_batch b ON b.id=m.batch_id JOIN ppr_product_spec s ON s.id=b.spec_id

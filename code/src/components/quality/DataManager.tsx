@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Activity, Download, FileSpreadsheet, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, Upload } from 'lucide-react';
+import { Activity, ArrowLeft, Download, FileSpreadsheet, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -26,7 +26,7 @@ function displayCell(key: string, value: unknown) {
   return String(value);
 }
 
-export function DataManager({ resource, title, description, fields, columns, excel = true, templateColumns = [], templateNotes = [], templateSample, detail }: { resource: string; title: string; description: string; fields: Field[]; columns: Column[]; excel?: boolean; templateColumns?: TemplateColumn[]; templateNotes?: string[]; templateSample?: Record<string, string | number>; detail?: DetailLink }) {
+export function DataManager({ resource, title, description, fields, columns, excel = true, templateColumns = [], templateNotes = [], templateSample, detail, preset, back, entityLabel }: { resource: string; title: string; description: string; fields: Field[]; columns: Column[]; excel?: boolean; templateColumns?: TemplateColumn[]; templateNotes?: string[]; templateSample?: Record<string, string | number>; detail?: DetailLink; preset?: Record<string, string | number>; back?: { href: string; label: string }; entityLabel?: string }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -39,11 +39,13 @@ export function DataManager({ resource, title, description, fields, columns, exc
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/quality/master/${resource}`); const json = await res.json();
+      // preset 同时充当列表收窄条件（如 ?batch_id=4），与接口的 scopeParams 对应。
+      const scope = new URLSearchParams(Object.entries(preset ?? {}).map(([key, value]) => [key, String(value)])).toString();
+      const res = await fetch(`/api/quality/master/${resource}${scope ? `?${scope}` : ''}`); const json = await res.json();
       if (!res.ok) throw new Error(json.error); setRows(json.data || []);
     } catch (error) { toast.error(error instanceof Error ? error.message : '加载失败'); }
     finally { setLoading(false); }
-  }, [resource]);
+  }, [resource, preset]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -55,13 +57,16 @@ export function DataManager({ resource, title, description, fields, columns, exc
   }, [fields]);
 
   const visible = useMemo(() => rows.filter((row) => JSON.stringify(row).toLowerCase().includes(query.toLowerCase())), [rows, query]);
-  const showEditor = (row?: Record<string, unknown>) => { setEditing(row || null); setForm(row ? { ...row } : Object.fromEntries(fields.map((field) => [field.key, '']))); setOpen(true); };
+  /** 下钻页面下，preset 里的字段是固定维度，不进表单、但每次保存都必须带上（新增自动归属，编辑不会被改走）。 */
+  const formFields = useMemo(() => fields.filter((field) => preset?.[field.key] === undefined), [fields, preset]);
+  const showEditor = (row?: Record<string, unknown>) => { setEditing(row || null); setForm(row ? { ...row } : Object.fromEntries(formFields.map((field) => [field.key, '']))); setOpen(true); };
   const save = async () => {
-    const missing = fields.filter((field) => field.required && (form[field.key] === '' || form[field.key] == null));
+    const missing = formFields.filter((field) => field.required && (form[field.key] === '' || form[field.key] == null));
     if (missing.length) return toast.warning(`请填写：${missing.map((field) => field.label).join('、')}`);
     setSaving(true);
     try {
-      const res = await fetch(`/api/quality/master/${resource}`, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, id: editing?.id }) });
+      const payload = { ...form, ...preset, id: editing?.id };
+      const res = await fetch(`/api/quality/master/${resource}`, { method: editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const json = await res.json(); if (!res.ok) throw new Error(json.error); toast.success(editing ? '数据已更新' : '数据已新增'); setOpen(false); await load();
     } catch (error) { toast.error(error instanceof Error ? error.message : '保存失败'); } finally { setSaving(false); }
   };
@@ -92,7 +97,8 @@ export function DataManager({ resource, title, description, fields, columns, exc
       const flagged = { high: 0, medium: 0 };
       const failures: string[] = [];
       for (const [index, row] of data.entries()) {
-        const res = await fetch(`/api/quality/master/${resource}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(row) });
+        // 下钻页面：preset 是固定维度，导入的每一行也必须归属到当前规格 / 批次，不给文件里填的值留口子。
+        const res = await fetch(`/api/quality/master/${resource}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...row, ...preset }) });
         if (!res.ok) {
           // 之前是把失败行静默丢掉，只报「成功 N / M」，用户根本不知道哪行错了。
           const json = await res.json().catch(() => null);
@@ -121,6 +127,7 @@ export function DataManager({ resource, title, description, fields, columns, exc
 
   return <>
     <PageHeader title={title} description={description} actions={<>
+      {back && <Button asChild variant="outline"><Link href={back.href}><ArrowLeft size={16} />{back.label}</Link></Button>}
       {excel && <>
         <Button variant="outline" onClick={() => { void downloadTemplate(); }}><Download size={16} />下载模板</Button>
         <Button variant="outline" asChild><label className="cursor-pointer"><Upload size={16} />Excel 导入<input className="hidden" type="file" accept=".xlsx,.xls,.csv" onChange={(event) => { importFile(event.target.files?.[0]); event.target.value=''; }} /></label></Button>
@@ -134,8 +141,8 @@ export function DataManager({ resource, title, description, fields, columns, exc
       </div>
       <CardContent className="p-4"><Table><TableHeader><TableRow>{columns.map((column) => <TableHead key={column.key} className="whitespace-nowrap">{column.label}</TableHead>)}<TableHead className="sticky right-0 bg-muted text-right">操作</TableHead></TableRow></TableHeader>
       <TableBody>{loading ? <TableRow><TableCell colSpan={columns.length + 1} className="h-32 text-center"><Loader2 className="mx-auto animate-spin text-blue-600"/></TableCell></TableRow> : visible.length ? visible.map((row) => <TableRow key={String(row.id)}>{columns.map((column) => <TableCell key={column.key} className="max-w-[280px] whitespace-nowrap">{column.render ? column.render(row) : displayCell(column.key, row[column.key])}</TableCell>)}<TableCell className="sticky right-0 whitespace-nowrap bg-white text-right">{detail && <Button variant="ghost" size="sm" asChild className="text-blue-700"><Link href={detail.href(row)}><Activity size={15}/>{detail.label}</Link></Button>}<Button variant="ghost" size="icon" onClick={() => showEditor(row)}><Pencil size={15}/></Button><Button variant="ghost" size="icon" className="text-red-600" onClick={() => remove(row)}><Trash2 size={15}/></Button></TableCell></TableRow>) : <TableRow><TableCell colSpan={columns.length + 1} className="h-32 text-center text-slate-500">暂无数据</TableCell></TableRow>}</TableBody></Table></CardContent></Card>
-    <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl"><DialogHeader><DialogTitle>{editing ? '编辑' : '新增'}{title}</DialogTitle><DialogDescription>保存后写入 MySQL，监控、诊断和报告将读取同一份数据。</DialogDescription></DialogHeader>
-      <div className="grid gap-4 py-2 sm:grid-cols-2">{fields.map((field) => <div key={field.key} className={field.type === 'textarea' ? 'sm:col-span-2' : ''}><Label className="mb-2 block">{field.label}{field.required && <span className="text-red-500"> *</span>}</Label>{field.type === 'select' ? <Select value={String(form[field.key] ?? '')} onValueChange={(value) => setForm((state) => ({ ...state, [field.key]: value }))}><SelectTrigger className="w-full"><SelectValue placeholder="请选择" /></SelectTrigger><SelectContent>{(field.options || options[field.optionResource || ''] || []).map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select> : field.type === 'textarea' ? <textarea className="min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm" value={String(form[field.key] ?? '')} onChange={(event) => setForm((state) => ({ ...state, [field.key]: event.target.value }))}/> : <Input type={field.type === 'number' ? 'number' : field.type === 'datetime' ? 'datetime-local' : 'text'} step={field.type === 'number' ? '0.001' : undefined} value={String(form[field.key] ?? '')} onChange={(event) => setForm((state) => ({ ...state, [field.key]: event.target.value }))}/>}</div>)}</div>
+    <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl"><DialogHeader><DialogTitle>{editing ? '编辑' : '新增'}{entityLabel ?? title}</DialogTitle><DialogDescription>保存后写入 MySQL，监控、诊断和报告将读取同一份数据。</DialogDescription></DialogHeader>
+      <div className="grid gap-4 py-2 sm:grid-cols-2">{formFields.map((field) => <div key={field.key} className={field.type === 'textarea' ? 'sm:col-span-2' : ''}><Label className="mb-2 block">{field.label}{field.required && <span className="text-red-500"> *</span>}</Label>{field.type === 'select' ? <Select value={String(form[field.key] ?? '')} onValueChange={(value) => setForm((state) => ({ ...state, [field.key]: value }))}><SelectTrigger className="w-full"><SelectValue placeholder="请选择" /></SelectTrigger><SelectContent>{(field.options || options[field.optionResource || ''] || []).map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select> : field.type === 'textarea' ? <textarea className="min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm" value={String(form[field.key] ?? '')} onChange={(event) => setForm((state) => ({ ...state, [field.key]: event.target.value }))}/> : <Input type={field.type === 'number' ? 'number' : field.type === 'datetime' ? 'datetime-local' : 'text'} step={field.type === 'number' ? '0.001' : undefined} value={String(form[field.key] ?? '')} onChange={(event) => setForm((state) => ({ ...state, [field.key]: event.target.value }))}/>}</div>)}</div>
       <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>取消</Button><Button onClick={save} disabled={saving} className="bg-blue-700 hover:bg-blue-800">{saving && <Loader2 className="animate-spin" size={16}/>}保存到数据库</Button></DialogFooter>
     </DialogContent></Dialog>
   </>;

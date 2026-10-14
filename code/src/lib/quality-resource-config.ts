@@ -6,7 +6,6 @@
  *   2. Excel 模板生成（src/lib/quality-template.ts 按这份配置拼表头）。
  * 放在纯数据模块里，模板就能用真实配置做自动化校验，不必依赖页面运行时。
  */
-import type { TemplateColumn } from '@/components/quality/DataManager';
 
 export type Field = {
   key: string;
@@ -40,7 +39,7 @@ export const QUALITY_RESOURCE_CONFIG: Record<string, ResourcePageConfig> = {
     columns: [{key:'code',label:'编码'},{key:'name',label:'名称'},{key:'description',label:'说明'},{key:'status',label:'状态'}],
   },
   specs: {
-    title: '产品规格', description: '维护规格的最大/最小外径、最大/最小壁厚和不圆度上限，作为监控判定限值；正式判定仍以适用标准为准。',
+    title: '产品台账', description: '维护产品规格与其判定限值（最大/最小外径、最大/最小壁厚、不圆度上限）；点「产品数据」进入该规格的生产批次与检验记录。',
     excel: false,
     fields: [{key:'code',label:'规格编码',required:true},{key:'name',label:'规格名称',required:true},{key:'category_id',label:'产品类别',type:'select',optionResource:'categories',required:true},{key:'outer_upper_mm',label:'最大外径 mm',type:'number',required:true},{key:'outer_lower_mm',label:'最小外径 mm',type:'number',required:true},{key:'wall_upper_mm',label:'最大壁厚 mm',type:'number',required:true},{key:'wall_lower_mm',label:'最小壁厚 mm',type:'number',required:true},{key:'ovality_upper_mm',label:'不圆度上限 mm',type:'number',required:true},{key:'status',label:'状态',type:'select',options:statusOptions}],
     columns: [{key:'code',label:'编码'},{key:'name',label:'名称'},{key:'category_name',label:'产品类别'},{key:'outer_upper_mm',label:'最大外径 mm'},{key:'outer_lower_mm',label:'最小外径 mm'},{key:'wall_upper_mm',label:'最大壁厚 mm'},{key:'wall_lower_mm',label:'最小壁厚 mm'},{key:'ovality_upper_mm',label:'不圆度上限 mm'},{key:'status',label:'状态'}],
@@ -76,45 +75,52 @@ export const QUALITY_RESOURCE_CONFIG: Record<string, ResourcePageConfig> = {
 };
 
 /**
- * 产品数据导入专用列：模板里不写数据库自增主键 batch_id，改用批次号，
- * 批次不存在时按 spec_code 自动新建（见 src/lib/quality-import.ts）。
+ * 产品台账下钻专用列。
+ * 产品台账 → 规格 → 生产批次 → 检验记录（检验时间 / 外径 / 壁厚 / 不圆度）。
+ * 批次维度比「批次基础信息」页少了设备、多了检验条数，因为这里看的是产品数据而不是产线。
  */
-export const MEASUREMENT_TEMPLATE_COLUMNS: TemplateColumn[] = [
-  { key: 'batch_no', label: '生产批次号', required: true, replaces: 'batch_id', note: '填批次号即可，系统自动匹配批次；批次不存在时按 spec_code 自动新建，无需知道数据库ID' },
-  { key: 'spec_code', label: '产品规格编码', note: '自动新建批次时必填，取值见系统管理 / 产品规格，例如 SPEC-25X4.2' },
-  { key: 'production_group', label: '生产组别', note: '自动新建批次时选填，默认「导入批次」' },
-  { key: 'batch_start_time', label: '批次开始时间', note: '自动新建批次时选填，默认取本行 inspect_time' },
+const scopedBatchStatus: Record<string, string> = { running: '生产中', completed: '已完成', paused: '暂停' };
+
+export const PRODUCT_BATCH_COLUMNS: Column[] = [
+  { key: 'batch_no', label: '批次号' },
+  { key: 'production_group', label: '生产组别' },
+  { key: 'start_time', label: '开始时间' },
+  { key: 'end_time', label: '结束时间' },
+  { key: 'status', label: '状态', render: (row) => scopedBatchStatus[String(row.status)] ?? String(row.status ?? '—') },
+  { key: 'measurement_count', label: '检验条数', render: (row) => `${Number(row.measurement_count ?? 0)} 条` },
+  { key: 'last_inspect_time', label: '最近检验时间' },
 ];
 
-export const MEASUREMENT_TEMPLATE_SAMPLE: Record<string, string | number> = {
-  record_no: 'IR-示例-0001', sample_no: 'S-示例', batch_no: '示例-批次-0001', spec_code: 'SPEC-25X4.2', production_group: '甲班',
-  batch_start_time: '2026-11-10 06:00:00', inspect_time: '2026-11-10 08:20:00',
+export const PRODUCT_MEASUREMENT_COLUMNS: Column[] = [
+  { key: 'inspect_time', label: '检验时间' },
+  { key: 'outer_diameter_mm', label: '外径 mm' },
+  { key: 'min_wall_thickness_mm', label: '壁厚 mm' },
+  { key: 'ovality_mm', label: '不圆度 mm' },
+];
+
+/**
+ * 下钻页面里「当前规格 / 当前批次」已经固定，表单与导入模板都不该再出现该字段：
+ * 规格页给批次固定 spec_id，批次页给检验记录固定 batch_id（保存与导入时由 preset 自动补上）。
+ */
+export const SCOPED_BATCH_FIELDS: Field[] = QUALITY_RESOURCE_CONFIG.batches.fields.filter((field) => field.key !== 'spec_id');
+export const SCOPED_MEASUREMENT_FIELDS: Field[] = QUALITY_RESOURCE_CONFIG.measurements.fields.filter((field) => field.key !== 'batch_id');
+
+/** 批次页的导入模板只填检验值，批次由页面决定。 */
+export const SCOPED_MEASUREMENT_SAMPLE: Record<string, string | number> = {
+  record_no: 'IR-示例-0001', sample_no: 'S-示例', inspect_time: '2026-11-10 08:20:00',
   outer_diameter_mm: 25.23, min_wall_thickness_mm: 4.4, max_wall_thickness_mm: 4.51,
   max_outer_diameter_mm: 25.31, min_outer_diameter_mm: 25.12, ovality_mm: 0.19,
   data_source: 'MES_IMPORT', quality_flag: 'normal', remark: '示例行：导入前请删除或覆盖本行',
 };
 
-export const MEASUREMENT_TEMPLATE_NOTES: string[] = [
+export const SCOPED_MEASUREMENT_NOTES: string[] = [
+  '本页导入的检验记录全部归入当前批次，模板里不需要批次号，也不需要规格编码。',
   '第一行是列名，不要修改或删除；第二行是示例行，导入前请删除或覆盖成真实数据。',
   'inspect_time 必须是文本格式 YYYY-MM-DD HH:mm:ss，不要用 Excel 的日期单元格，否则会变成序列号导入失败。',
   'data_source、quality_flag 可以留空，留空时分别取默认值 QMS / normal，不会报错。',
   'quality_flag（质量标记）由预警判定引擎在保存后自动回写 normal / medium / high，通常不需要手工填。',
-  '一次导入里的同一批次号会复用同一个批次，不会重复建。',
   '留空的可选测量值不会参与判定：没有实测值的指标不会产生预警事件。',
   '',
-  '预警判定规则（限值取「系统管理 / 产品规格」，改规格后会自动重算该规格下全部批次）：',
-  '1) 超出标准区间 → 高风险。外径 / 壁厚低于下限或高于上限，不圆度只判上限。',
-  '2) 连续 3 点进入接近带 → 中风险。接近带 = 标准区间宽度 × 15%，贴在上下限两侧；',
-  '   例：壁厚区间 4.200–4.800，宽度 0.6，接近带为 4.200–4.290 与 4.710–4.800，',
-  '   连续 3 个点落在这两段里即触发，事件挂在第 3 个点上。',
-  '3) 其余 → 正常，事件自动关闭，收在监控页「正常记录」页签里。',
+  '判定限值取「数据源管理 / 产品台账」里该规格的最大/最小外径、最大/最小壁厚与不圆度上限；改规格后会自动重算该规格下全部批次。',
+  '判定规则：超出标准区间 → 高风险；连续 3 点进入接近带（区间宽度 × 15%）→ 中风险；其余 → 正常。',
 ];
-
-/** 每个资源额外带上的模板列 / 示例行 / 注意事项。 */
-export const RESOURCE_TEMPLATE_EXTRAS: Record<string, { templateColumns?: TemplateColumn[]; templateSample?: Record<string, string | number>; templateNotes?: string[] }> = {
-  measurements: {
-    templateColumns: MEASUREMENT_TEMPLATE_COLUMNS,
-    templateSample: MEASUREMENT_TEMPLATE_SAMPLE,
-    templateNotes: MEASUREMENT_TEMPLATE_NOTES,
-  },
-};

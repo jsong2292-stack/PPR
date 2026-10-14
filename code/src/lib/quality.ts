@@ -15,6 +15,13 @@ export interface ResourceConfig {
   required: string[];
   orderBy: string;
   listSql: string;
+  /**
+   * 下钻页面的收窄维度：查询参数名，顺序对应 scopedListSql 里的 `?` 占位符。
+   * 只有这些参数全部传齐时才会走 scopedListSql，避免下钻页面误拿到全量数据。
+   */
+  scopeParams?: string[];
+  /** 带 WHERE 占位符的列表 SQL，供「规格 → 批次 → 检验记录」这类下钻页面使用。 */
+  scopedListSql?: string;
 }
 
 /**
@@ -61,6 +68,15 @@ export const RESOURCE_CONFIG: Record<MasterResource, ResourceConfig> = {
       FROM ppr_batch b JOIN ppr_product_spec s ON s.id=b.spec_id
       LEFT JOIN ppr_equipment ex ON ex.id=b.extruder_id
       LEFT JOIN ppr_equipment ha ON ha.id=b.haul_off_id ORDER BY b.id DESC`,
+    // 产品台账下钻：某个规格下的批次，额外带出检验条数与最近检验时间。
+    scopeParams: ['spec_id'],
+    scopedListSql: `SELECT b.*, s.name AS spec_name, ex.name AS extruder_name, ha.name AS haul_off_name,
+        (SELECT COUNT(*) FROM ppr_product_measurement m WHERE m.batch_id=b.id) AS measurement_count,
+        (SELECT MAX(m.inspect_time) FROM ppr_product_measurement m WHERE m.batch_id=b.id) AS last_inspect_time
+      FROM ppr_batch b JOIN ppr_product_spec s ON s.id=b.spec_id
+      LEFT JOIN ppr_equipment ex ON ex.id=b.extruder_id
+      LEFT JOIN ppr_equipment ha ON ha.id=b.haul_off_id
+      WHERE b.spec_id=? ORDER BY b.start_time DESC`,
   },
   metrics: {
     table: 'ppr_metric',
@@ -80,6 +96,12 @@ export const RESOURCE_CONFIG: Record<MasterResource, ResourceConfig> = {
       JOIN ppr_batch b ON b.id=m.batch_id JOIN ppr_product_spec s ON s.id=b.spec_id
       JOIN ppr_product_category c ON c.id=s.category_id
       ORDER BY m.inspect_time DESC`,
+    // 产品台账下钻：某个批次下的全部检验记录。
+    scopeParams: ['batch_id'],
+    scopedListSql: `SELECT m.*, b.batch_no, s.name AS spec_name, c.name AS category_name FROM ppr_product_measurement m
+      JOIN ppr_batch b ON b.id=m.batch_id JOIN ppr_product_spec s ON s.id=b.spec_id
+      JOIN ppr_product_category c ON c.id=s.category_id
+      WHERE m.batch_id=? ORDER BY m.inspect_time DESC`,
   },
 };
 

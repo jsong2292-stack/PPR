@@ -17,9 +17,10 @@
 
 ### PPR 质量业务
 
-- **系统管理**：产品类别、产品规格、设备类型、设备台账
-- **数据源管理**：批次基础信息、质量指标与影响因素、产品检验数据
-- **设备采集数据**：合并进设备台账，按「设备 → 生产批次 → 采集项」三级下钻；采集项随设备类型变化（挤出机=温度/压力，牵引机=牵引速度），并在批次内提供专用 Excel 模板导入
+- **系统管理**：产品类别、质量指标与影响因素、设备类型
+- **数据源管理**：批次基础信息、产品台账、设备台账
+- **产品台账**：产品规格与产品检验数据合并为一页，按「规格 → 生产批次 → 检验记录」三级下钻；批次页提供检验模板导入，保存后自动重算预警
+- **设备台账**：设备采集数据合并进来，按「设备 → 生产批次 → 采集项」三级下钻；采集项随设备类型变化（挤出机=温度/压力，牵引机=牵引速度），并在批次内提供专用 Excel 模板导入
 - **数据维护**：列表检索、新增、编辑、删除、CSV 模板下载、Excel/CSV 批量导入
 - **监控预警**：质量指标趋势、规格演示限值、预警队列、产品数据重新扫描
 - **双模式异常诊断**：可选择确定性规则引擎或 LangChain Agent，并支持运行时配置切换
@@ -180,14 +181,17 @@ docker compose up -d --build
 | `/quality/report` | 8D 报告工作台 |
 | `/quality/history` | 历史分析归档 |
 | `/quality/data/categories` | 产品类别 |
-| `/quality/data/specs` | 产品规格 |
 | `/quality/data/equipment-types` | 设备类型 |
 | `/quality/data/equipment` | 设备台账（设备列表） |
 | `/quality/data/equipment/[equipmentId]` | 该设备的生产批次列表 |
 | `/quality/data/equipment/[equipmentId]/[batchId]` | 该批次下的设备采集项 |
+| `/quality/data/products` | 产品台账（产品列表） |
+| `/quality/data/products/[specId]` | 该规格的生产批次列表 |
+| `/quality/data/products/[specId]/[batchId]` | 该批次下的检验记录 |
 | `/quality/data/batches` | 批次基础信息 |
 | `/quality/data/metrics` | 质量指标与影响因素 |
-| `/quality/data/measurements` | 产品检验数据 |
+
+> 旧入口 `/quality/data/specs`、`/quality/data/measurements` 会跳转到产品台账，`/quality/data/readings` 会跳转到设备台账。
 | `/admin` | 平台管理后台 |
 
 ## 业务 API
@@ -196,10 +200,11 @@ docker compose up -d --build
 
 | API | 方法 | 说明 |
 |---|---|---|
-| `/api/quality/master/[resource]` | GET/POST/PUT/DELETE | 7 类主数据和数据源通用 CRUD |
+| `/api/quality/master/[resource]` | GET/POST/PUT/DELETE | 7 类主数据和数据源通用 CRUD；`batches?spec_id=`、`measurements?batch_id=` 用于产品台账下钻收窄 |
 | `/api/quality/equipment/[equipmentId]/batches` | GET/POST | 该设备的生产批次列表 / 在设备下新增批次 |
 | `/api/quality/equipment/[equipmentId]/batches/[batchId]/readings` | GET/POST | 该批次的采集项列表 / 新增采集项（记录编号自动生成） |
 | `/api/quality/equipment/[equipmentId]/batches/[batchId]/readings/[readingId]` | PUT/DELETE | 编辑 / 删除单条采集项 |
+| `/api/quality/products/[specId]` | GET | 产品台账下钻的面包屑上下文；带 `?batch_id=` 时一并返回批次 |
 | `/api/quality/dashboard` | GET | 监控统计、趋势、预警和产品数据 |
 | `/api/quality/alerts/evaluate` | POST | 按规格演示限值重新扫描产品数据 |
 | `/api/quality/analysis` | GET/POST/PUT | 按规则或Agent模式生成分析、保存工程师验证 |
@@ -209,8 +214,8 @@ docker compose up -d --build
 
 ## 数据流说明
 
-1. 在系统管理中维护产品、规格、设备（设备类型只保留挤出机与牵引机）。
-2. 在数据源管理中维护批次与产品检验记录；设备采集数据在「设备台账」里按「设备 → 生产批次 → 采集项」逐级维护，批次内可用专用模板批量导入。
+1. 在系统管理中维护产品类别、质量指标与设备类型（设备类型只保留挤出机与牵引机）。
+2. 在数据源管理中维护批次基础信息、产品台账与设备台账；产品检验数据在「产品台账 → 规格 → 生产批次 → 检验记录」里逐级维护，设备采集数据在「设备台账 → 设备 → 生产批次 → 采集项」里逐级维护，两个下钻都在批次页提供专用模板批量导入。
 3. 监控页读取同一数据库中的产品数据；点击“重新扫描”可为新增超限记录创建预警。
 4. 诊断页以 `alert_id` 为入口：规则模式直接执行确定性查询；Agent模式由 LangChain `createAgent` 自主选择白名单工具，并以 Zod Schema 输出结构化分析。
 5. 工程师逐条确认或驳回结论，验证结果实时写入 `ppr_analysis_conclusion`。
@@ -227,6 +232,7 @@ src/
 ├── components/ui/                   # 平台 shadcn/ui 组件
 ├── lib/quality.ts                   # 资源白名单、业务公共方法
 ├── lib/quality-equipment.ts         # 设备类型 → 批次关联字段 / 采集项（页面列与模板列共用）
+├── lib/quality-resource-config.ts   # 各资源页的字段/列配置 + 产品台账下钻列
 ├── lib/quality-analysis/            # 规则引擎、LangChain Agent、工具与双模式编排
 ├── lib/auth.ts                      # 平台认证
 └── storage/database/mysql-client.ts # MySQL 连接池与事务

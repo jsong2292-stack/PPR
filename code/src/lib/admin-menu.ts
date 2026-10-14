@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
-  Boxes, ClipboardCheck, Database, Factory, Gauge, ListChecks, PackageSearch,
+  Boxes, ClipboardCheck, Database, Factory, Gauge, ListChecks,
   Settings2, Wrench,
 } from 'lucide-react';
 
@@ -22,24 +22,23 @@ export const ADMIN_MENU_GROUPS: AdminMenuGroup[] = [
   {
     key: 'system',
     label: '系统管理',
-    description: '维护产品类别、产品规格、质量指标、设备类型与设备台账等基础主数据。',
+    description: '维护产品类别、质量指标、设备类型等基础主数据。',
     icon: Settings2,
     items: [
       { label: '产品类别', href: '/quality/data/categories', icon: Boxes },
-      { label: '产品规格', href: '/quality/data/specs', icon: PackageSearch },
       { label: '质量指标与影响因素', href: '/quality/data/metrics', icon: Gauge },
       { label: '设备类型', href: '/quality/data/equipment-types', icon: Wrench },
-      { label: '设备台账', href: '/quality/data/equipment', icon: Factory },
     ],
   },
   {
     key: 'datasource',
     label: '数据源管理',
-    description: '维护批次基础信息与产品数据；设备采集数据在「设备台账」里按设备、批次逐级查看。',
+    description: '维护批次基础信息、产品台账与设备台账；点进去可逐级下钻到批次和明细数据。',
     icon: Database,
     items: [
       { label: '批次基础信息', href: '/quality/data/batches', icon: ListChecks },
-      { label: '产品数据', href: '/quality/data/measurements', icon: ClipboardCheck },
+      { label: '产品台账', href: '/quality/data/products', icon: ClipboardCheck },
+      { label: '设备台账', href: '/quality/data/equipment', icon: Factory },
     ],
   },
 ];

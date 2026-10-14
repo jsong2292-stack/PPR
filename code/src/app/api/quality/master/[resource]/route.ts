@@ -36,12 +36,16 @@ async function autoRefreshAlerts(resource: string, patches: { batchIds?: unknown
   return null;
 }
 
-export async function GET(_request: NextRequest, context: { params: Promise<{ resource: string }> }) {
+export async function GET(request: NextRequest, context: { params: Promise<{ resource: string }> }) {
   const denied = await adminGuard(); if (denied) return denied;
   const { resource } = await context.params;
   if (!isMasterResource(resource)) return error('不支持的数据资源', 404);
+  const config = RESOURCE_CONFIG[resource];
+  // 下钻页面用查询参数收窄列表：scopeParams 必须全部传齐才生效，缺一个就退回全量，避免误展示。
+  const scopeValues = (config.scopeParams ?? []).map((key) => request.nextUrl.searchParams.get(key));
+  const scoped = Boolean(config.scopedListSql && scopeValues.length && scopeValues.every((value) => value !== null && value !== ''));
   try {
-    const rows = await dbClient.queryAll(RESOURCE_CONFIG[resource].listSql);
+    const rows = await dbClient.queryAll(scoped ? config.scopedListSql! : config.listSql, scoped ? (scopeValues as string[]) : []);
     return NextResponse.json({ data: rows });
   } catch (cause) {
     console.error('quality master GET failed', cause);

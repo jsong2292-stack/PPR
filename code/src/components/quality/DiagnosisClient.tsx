@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Bot, Check, ChevronRight, Database, Loader2, RefreshCw, Save, Settings2, X } from 'lucide-react';
+import { Bot, Check, ChevronRight, Database, FileSearch, Loader2, RefreshCw, Save, Settings2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,9 +20,10 @@ type Row = Record<string, unknown>;
 type AnalysisMode = 'rule' | 'agent';
 type AgentStatus = { mode: AnalysisMode; configured: boolean; model: string; fallbackToRule: boolean; framework: string };
 
-/** 诊断页只处理异常事件：risk_level='normal' 的正常记录不进入诊断流程（与监控页「进入诊断」入口一致）。 */
-const isAbnormalAlert = (row: Row) => String(row.risk_level) !== 'normal';
-
+/**
+ * 诊断页只处理异常事件：本页由监控页「进入诊断」下钻进入（?alertId=），
+ * 页面只呈现该事件的证据与结论，因此不再提供事件切换入口。
+ */
 const riskLabels: Record<string, string> = { normal: '正常', medium: '中风险', high: '高风险', error: '数据核对' };
 const riskStyles: Record<string, string> = {
   normal: 'bg-emerald-50 text-emerald-700',
@@ -70,11 +71,13 @@ export function DiagnosisClient() {
   const search = useSearchParams();
   const [alerts, setAlerts] = useState<Row[]>([]);
   const [measurements, setMeasurements] = useState<Row[]>([]);
-  const [alertId, setAlertId] = useState(search.get('alertId') || '');
+  /** alertId 只来自监控页下钻链接，页面内不再改变它。 */
+  const alertId = search.get('alertId') || '';
   const [analysis, setAnalysis] = useState<Row | null>(null);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [mode, setMode] = useState<AnalysisMode>('rule');
   const [loading, setLoading] = useState(true);
+  const [alertsReady, setAlertsReady] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [processEvents, setProcessEvents] = useState<AnalysisProcessEvent[]>([]);
   const [processExpanded, setProcessExpanded] = useState(false);
@@ -84,16 +87,11 @@ export function DiagnosisClient() {
     const response = await fetch('/api/quality/dashboard');
     const json = await response.json();
     if (response.ok) {
-      const list: Row[] = json.alerts || [];
-      setAlerts(list);
+      setAlerts(json.alerts || []);
       setMeasurements(json.measurements || []);
-      // 默认选中第一条异常事件；正常记录不允许出现在诊断页的下拉里。
-      if (!alertId) {
-        const firstAbnormal = list.find(isAbnormalAlert);
-        if (firstAbnormal) setAlertId(String(firstAbnormal.id));
-      }
     }
-  }, [alertId]);
+    setAlertsReady(true);
+  }, []);
 
   const loadAgentStatus = useCallback(async () => {
     const response = await fetch('/api/quality/agent/status');
@@ -105,7 +103,7 @@ export function DiagnosisClient() {
   }, []);
 
   const loadAnalysis = useCallback(async (id: string) => {
-    if (!id) { setAnalysis(null); return; }
+    if (!id) { setAnalysis(null); setLoading(false); return; }
     setLoading(true);
     try {
       const response = await fetch(`/api/quality/analysis?alertId=${id}`);
@@ -220,56 +218,25 @@ export function DiagnosisClient() {
     conclusions: (state.conclusions as Row[]).map((item) => item.id === id ? { ...item, [key]: value } : item),
   } : state);
 
+  /** 事件由监控页下钻带入（?alertId=），页面只展示该事件的证据与结论，不再提供切换。 */
   const selected = alerts.find((item) => String(item.id) === alertId);
-  /** 下拉候选只保留中/高风险事件（risk_level ≠ normal）。 */
-  const abnormalAlerts = alerts.filter(isAbnormalAlert);
-  const normalAlertCount = alerts.length - abnormalAlerts.length;
   const breakdown = selected ? ruleBreakdown(selected) : null;
   const engineType = String(analysis?.engine_type || 'rule');
 
   return <>
     <PageHeader
       title="异常诊断与验证"
-      description="支持确定性规则引擎与LangChain Agent两种模式；所有结论均需工程师验证。"
-      actions={<Button variant="outline" asChild><Link href="/quality/monitor"><ChevronRight className="rotate-180" size={16} />返回监控</Link></Button>}
+      description="由质量监控的异常事件下钻进入：本页只展示该事件的证据、趋势与待验证结论。"
+      actions={<>
+        <Button variant="outline" asChild><Link href="/quality/monitor"><ChevronRight className="rotate-180" size={16} />返回监控</Link></Button>
+        <Button variant="ghost" onClick={() => loadAnalysis(alertId)} disabled={!alertId}><RefreshCw size={16} />刷新</Button>
+      </>}
     />
 
-    <Card className="mb-5 border-slate-200 shadow-sm">
-      <CardContent className="flex flex-wrap items-center gap-3 p-4">
-        <Select value={alertId} onValueChange={setAlertId}>
-          <SelectTrigger className="w-full max-w-xl"><SelectValue placeholder={abnormalAlerts.length ? '选择异常事件' : '暂无可诊断的异常事件'} /></SelectTrigger>
-          <SelectContent>{abnormalAlerts.length
-            ? abnormalAlerts.map((item) => <SelectItem key={String(item.id)} value={String(item.id)}>{String(item.event_no)} · {String(item.batch_no)} · {String(item.rule_name)}</SelectItem>)
-            : <SelectItem value="__none__" disabled>暂无可诊断的异常事件</SelectItem>}</SelectContent>
-        </Select>
-        <span className="text-xs text-slate-500">仅可选异常批次事件（中 / 高风险）{normalAlertCount > 0 ? `，已过滤 ${normalAlertCount} 条正常记录` : ''}</span>
-        <Select value={mode} onValueChange={(value) => setMode(value as AnalysisMode)}>
-          <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="rule">规则引擎模式</SelectItem>
-            <SelectItem value="agent">LangChain Agent</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button onClick={generate} disabled={generating} className="bg-indigo-600 hover:bg-indigo-700">
-          {generating ? <Loader2 className="animate-spin" size={16} /> : <Bot size={16} />}
-          {analysis ? '重新生成分析' : '生成分析'}
-        </Button>
-        <Button variant="ghost" onClick={() => loadAnalysis(alertId)}><RefreshCw size={16} />刷新</Button>
-      </CardContent>
-    </Card>
-
-    {agentStatus && <div className={`mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 text-sm ${mode === 'agent' && !agentStatus.configured ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-blue-200 bg-blue-50 text-blue-800'}`}>
-      <div className="flex items-center gap-2"><Settings2 size={16} /><b>当前选择：{mode === 'agent' ? 'LangChain Agent' : '规则引擎'}</b><span>· 系统默认 {agentStatus.mode === 'agent' ? 'Agent' : '规则'}</span></div>
-      <span>{mode === 'agent' ? (agentStatus.configured ? `模型 ${agentStatus.model} · ${agentStatus.framework}` : `未配置API密钥${agentStatus.fallbackToRule ? '，将自动降级规则模式' : ''}`) : '确定性规则和模板，不调用大模型'}</span>
-    </div>}
-
-    <AnalysisProcessPanel
-      events={processEvents}
-      expanded={processExpanded}
-      generating={generating}
-      finished={processFinished}
-      onToggle={() => setProcessExpanded((value) => !value)}
-    />
+    {/* 事件切换已移除：alertId 由监控页「进入诊断」下钻带入。直接访问未带参数时给出回跳入口，不再默认选中其他事件。 */}
+    {!alertsReady ? <div className="grid h-64 place-items-center"><Loader2 className="animate-spin text-blue-700" /></div> : !selected ?
+      <Card className="border-dashed border-slate-300"><CardContent className="grid h-64 place-items-center text-center"><div><FileSearch className="mx-auto mb-3 text-slate-400" /><b>未选择异常事件</b><p className="mt-1 text-sm text-slate-500">请在质量监控的预警事件队列中点击「进入诊断」，下钻查看对应事件。</p><Button asChild className="mt-4 bg-blue-700 hover:bg-blue-800"><Link href="/quality/monitor">前往质量监控</Link></Button></div></CardContent></Card>
+      : <>
 
     {selected && <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {[['预警事件', selected.event_no], ['生产批次', selected.batch_no], ['触发规则', `${selected.rule_code} · ${selected.rule_name}`], ['观测值', `${selected.observed_value ?? '—'} mm`]].map(([label, value]) =>
@@ -298,6 +265,38 @@ export function DiagnosisClient() {
       alertMetricLabel={metricLabels[String(selected.metric_code ?? '')]}
     />}
 
+    {/* 生成分析移到数据展示之后：先读完限值对照与趋势图，再选择模式生成，结论紧随其后，保证阅读连贯。 */}
+    <Card className="mb-5 border-slate-200 shadow-sm">
+      <CardHeader className="border-b border-slate-100 pb-3"><div><CardTitle className="text-base">生成诊断分析</CardTitle><p className="mt-1 text-xs text-slate-500">基于上方限值对照、批次尺寸趋势与设备工艺数据整理结论；生成过程与结论在下方展示。</p></div></CardHeader>
+      <CardContent className="flex flex-wrap items-center gap-3 p-4">
+        <Select value={mode} onValueChange={(value) => setMode(value as AnalysisMode)}>
+          <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="rule">规则引擎模式</SelectItem>
+            <SelectItem value="agent">LangChain Agent</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button onClick={generate} disabled={generating} className="bg-indigo-600 hover:bg-indigo-700">
+          {generating ? <Loader2 className="animate-spin" size={16} /> : <Bot size={16} />}
+          {analysis ? '重新生成分析' : '生成分析'}
+        </Button>
+        <span className="text-xs text-slate-500">{analysis ? '重新生成会按当前数据重算结论，已确认的结论需重新验证。' : '生成后系统会保存证据、工具轨迹与待验证结论。'}</span>
+      </CardContent>
+    </Card>
+
+    {agentStatus && <div className={`mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 text-sm ${mode === 'agent' && !agentStatus.configured ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-blue-200 bg-blue-50 text-blue-800'}`}>
+      <div className="flex items-center gap-2"><Settings2 size={16} /><b>当前选择：{mode === 'agent' ? 'LangChain Agent' : '规则引擎'}</b><span>· 系统默认 {agentStatus.mode === 'agent' ? 'Agent' : '规则'}</span></div>
+      <span>{mode === 'agent' ? (agentStatus.configured ? `模型 ${agentStatus.model} · ${agentStatus.framework}` : `未配置API密钥${agentStatus.fallbackToRule ? '，将自动降级规则模式' : ''}`) : '确定性规则和模板，不调用大模型'}</span>
+    </div>}
+
+    <AnalysisProcessPanel
+      events={processEvents}
+      expanded={processExpanded}
+      generating={generating}
+      finished={processFinished}
+      onToggle={() => setProcessExpanded((value) => !value)}
+    />
+
     {loading ? <div className="grid h-64 place-items-center"><Loader2 className="animate-spin text-blue-700" /></div> : !analysis ?
       <Card className="border-dashed border-slate-300"><CardContent className="grid h-64 place-items-center text-center"><div><Bot className="mx-auto mb-3 text-slate-400" /><b>尚未生成诊断分析</b><p className="mt-1 text-sm text-slate-500">选择模式后生成分析，系统会保存证据、工具轨迹和待验证结论。</p></div></CardContent></Card> : <>
         {Boolean(analysis.fallback_reason) && <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><b>Agent降级说明：</b>{String(analysis.fallback_reason)}</div>}
@@ -315,5 +314,7 @@ export function DiagnosisClient() {
 
         <Card className="border-blue-200 bg-blue-50 shadow-sm"><CardContent className="flex flex-wrap items-center justify-between gap-4 p-5"><div><b className="text-blue-950">下一步：生成 8D 报告</b><p className="mt-1 text-sm text-blue-800">报告会继承事件、分析摘要和工程师已确认结论，继续完成 D1–D8。</p></div><Button asChild className="bg-blue-700 hover:bg-blue-800"><Link href={`/quality/report?analysisId=${analysis.id}`}>进入 8D 工作台<ChevronRight size={16} /></Link></Button></CardContent></Card>
       </>}
+
+    </>}
   </>;
 }

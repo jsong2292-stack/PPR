@@ -286,27 +286,10 @@ CREATE TABLE IF NOT EXISTS ppr_equipment (
   CONSTRAINT fk_ppr_equipment_type FOREIGN KEY (type_id) REFERENCES ppr_equipment_type(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PPR生产设备台账';
 
--- 生产批次：连接规格、设备、生产时间和后续质量记录。
-CREATE TABLE IF NOT EXISTS ppr_batch (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键，自增编号',
-  batch_no VARCHAR(64) NOT NULL COMMENT '生产批次号，全局唯一',
-  spec_id BIGINT UNSIGNED NOT NULL COMMENT '产品规格ID',
-  extruder_id BIGINT UNSIGNED NULL COMMENT '挤出机设备ID',
-  haul_off_id BIGINT UNSIGNED NULL COMMENT '牵引机设备ID',
-  production_group VARCHAR(64) NOT NULL COMMENT '生产组别',
-  start_time DATETIME NOT NULL COMMENT '生产开始时间',
-  end_time DATETIME NULL COMMENT '生产结束时间',
-  status ENUM('running','completed','paused') NOT NULL DEFAULT 'completed' COMMENT '批次状态：生产中、已完成、暂停',
-  data_source VARCHAR(64) NOT NULL DEFAULT 'MES' COMMENT '批次基础信息来源系统',
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (id),
-  UNIQUE KEY uk_ppr_batch_no (batch_no),
-  KEY idx_ppr_batch_spec (spec_id),
-  CONSTRAINT fk_ppr_batch_spec FOREIGN KEY (spec_id) REFERENCES ppr_product_spec(id) ON DELETE RESTRICT,
-  CONSTRAINT fk_ppr_batch_extruder FOREIGN KEY (extruder_id) REFERENCES ppr_equipment(id) ON DELETE SET NULL,
-  CONSTRAINT fk_ppr_batch_haul_off FOREIGN KEY (haul_off_id) REFERENCES ppr_equipment(id) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PPR生产批次基础信息';
+-- 生产批次：**不再是表**。
+-- 批次号是产品检验数据与设备采集数据之间唯一的关联键，批次本身不持久化：
+-- 它由下面两张子表按 batch_no 实时聚合出来，见本文件末尾的 ppr_batch 视图。
+-- 因此「批次」没有需要单独维护的状态、结束时间、设备归属等字段，也没有手工新建批次的入口。
 
 -- 质量指标及影响因素：纯指标字典（编码/名称/单位/影响因素/说明）；判定限值统一取产品规格表 ppr_product_spec。
 CREATE TABLE IF NOT EXISTS ppr_metric (
@@ -326,11 +309,15 @@ CREATE TABLE IF NOT EXISTS ppr_metric (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PPR质量指标与影响因素字典';
 
 -- 产品检验数据：一条样管记录包含外径、壁厚和不圆度相关测量值。
+-- 归属关系全部落本行：batch_no 关联设备采集数据，spec_id 决定判定限值，不再依赖批次主表。
 CREATE TABLE IF NOT EXISTS ppr_product_measurement (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键，自增编号',
   record_no VARCHAR(64) NOT NULL COMMENT '检验记录编号，全局唯一',
   sample_no VARCHAR(64) NOT NULL COMMENT '样管编号',
-  batch_id BIGINT UNSIGNED NOT NULL COMMENT '所属生产批次ID',
+  batch_no VARCHAR(64) NOT NULL COMMENT '生产批次号，与设备采集数据按批次号关联',
+  spec_id BIGINT UNSIGNED NOT NULL COMMENT '产品规格ID，判定限值来源',
+  production_group VARCHAR(64) NULL COMMENT '生产组别，来自产品数据导入',
+  batch_start_time DATETIME NULL COMMENT '批次开始时间，来自产品数据导入',
   inspect_time DATETIME NOT NULL COMMENT '检验时间',
   outer_diameter_mm DECIMAL(10,3) NULL COMMENT '外径测量值，单位mm',
   min_wall_thickness_mm DECIMAL(10,3) NULL COMMENT '壁厚，单位mm',
@@ -345,15 +332,16 @@ CREATE TABLE IF NOT EXISTS ppr_product_measurement (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (id),
   UNIQUE KEY uk_ppr_measurement_record_no (record_no),
-  KEY idx_ppr_measurement_batch_time (batch_id, inspect_time),
-  CONSTRAINT fk_ppr_measurement_batch FOREIGN KEY (batch_id) REFERENCES ppr_batch(id) ON DELETE RESTRICT
+  KEY idx_ppr_measurement_batch_time (batch_no, inspect_time),
+  KEY idx_ppr_measurement_spec_time (spec_id, inspect_time),
+  CONSTRAINT fk_ppr_measurement_spec FOREIGN KEY (spec_id) REFERENCES ppr_product_spec(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PPR产品检验数据';
 
--- 设备采集数据：按批次、设备和时刻保存关键工艺参数。
+-- 设备采集数据：按批次号、设备和时刻保存关键工艺参数。
 CREATE TABLE IF NOT EXISTS ppr_equipment_reading (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键，自增编号',
   record_no VARCHAR(64) NOT NULL COMMENT '设备采集记录编号，全局唯一',
-  batch_id BIGINT UNSIGNED NOT NULL COMMENT '所属生产批次ID',
+  batch_no VARCHAR(64) NOT NULL COMMENT '生产批次号，与产品检验数据按批次号关联',
   equipment_id BIGINT UNSIGNED NOT NULL COMMENT '采集设备ID',
   collect_time DATETIME NOT NULL COMMENT '设备数据采集时间',
   temperature_c DECIMAL(10,2) NULL COMMENT '温度，单位摄氏度',
@@ -365,12 +353,78 @@ CREATE TABLE IF NOT EXISTS ppr_equipment_reading (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (id),
   UNIQUE KEY uk_ppr_equipment_reading_no (record_no),
-  -- 同一设备 + 同一批次 + 同一采集时刻只能有一条记录，防止批次内 Excel 重复导入。
-  UNIQUE KEY uk_ppr_equipment_reading_equipment_batch_time (equipment_id, batch_id, collect_time),
-  KEY idx_ppr_equipment_reading_batch_time (batch_id, collect_time),
-  CONSTRAINT fk_ppr_reading_batch FOREIGN KEY (batch_id) REFERENCES ppr_batch(id) ON DELETE RESTRICT,
+  -- 同一设备 + 同一批次号 + 同一采集时刻只能有一条记录，防止批次内 Excel 重复导入。
+  UNIQUE KEY uk_ppr_equipment_reading_equipment_batch_time (equipment_id, batch_no, collect_time),
+  KEY idx_ppr_equipment_reading_batch_time (batch_no, collect_time),
   CONSTRAINT fk_ppr_reading_equipment FOREIGN KEY (equipment_id) REFERENCES ppr_equipment(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PPR设备工艺参数采集数据';
+
+-- 生产批次视图：批次号 → 批次清单，全部由产品检验数据 + 设备采集数据实时聚合。
+-- 没有数据的批次号在这里不存在（没有需要维护的批次主数据）。
+-- 字段含义：
+--   id / batch_no     批次号（id 为兼容前端行主键与 URL，值就是批次号本身）
+--   spec_id           该批次检验记录上的规格，决定判定限值；只有采集数据时为 NULL
+--   production_group  生产组别（取该批次检验记录上的值）
+--   start_time        批次开始时间（优先取导入时的 batch_start_time，否则取最早检验时间）
+--   end_time          最后一次检验 / 采集时间（派生值，不再人工维护）
+--   extruder_id 等    设备归属由采集数据反推：该批次有采集数据的挤出机 / 牵引机
+CREATE OR REPLACE VIEW ppr_batch AS
+SELECT
+  k.batch_no                                        AS id,
+  k.batch_no                                        AS batch_no,
+  m.spec_id                                         AS spec_id,
+  m.production_group                                AS production_group,
+  m.start_time                                      AS start_time,
+  GREATEST(COALESCE(m.last_inspect_time, '1970-01-01 00:00:00'), COALESCE(r.last_collect_time, '1970-01-01 00:00:00')) AS end_time,
+  'completed'                                       AS status,
+  COALESCE(m.measurement_count, 0)                  AS measurement_count,
+  COALESCE(r.reading_count, 0)                      AS reading_count,
+  m.last_inspect_time                               AS last_inspect_time,
+  r.last_collect_time                               AS last_collect_time,
+  eq.extruder_id                                    AS extruder_id,
+  eq.extruder_name                                  AS extruder_name,
+  eq.haul_off_id                                    AS haul_off_id,
+  eq.haul_off_name                                  AS haul_off_name,
+  COALESCE(m.start_time, r.first_collect_time)      AS created_at,
+  COALESCE(m.last_inspect_time, r.last_collect_time) AS updated_at
+FROM (
+  SELECT batch_no FROM ppr_product_measurement
+  UNION
+  SELECT batch_no FROM ppr_equipment_reading
+) k
+LEFT JOIN (
+  SELECT batch_no,
+         MAX(spec_id)                                  AS spec_id,
+         MAX(production_group)                         AS production_group,
+         MIN(COALESCE(batch_start_time, inspect_time)) AS start_time,
+         COUNT(*)                                      AS measurement_count,
+         MAX(inspect_time)                             AS last_inspect_time
+  FROM ppr_product_measurement
+  GROUP BY batch_no
+) m ON m.batch_no = k.batch_no
+LEFT JOIN (
+  SELECT batch_no,
+         COUNT(*)          AS reading_count,
+         MIN(collect_time) AS first_collect_time,
+         MAX(collect_time) AS last_collect_time
+  FROM ppr_equipment_reading
+  GROUP BY batch_no
+) r ON r.batch_no = k.batch_no
+LEFT JOIN (
+  SELECT rd.batch_no,
+         MAX(CASE WHEN t.code = 'ETYPE-EXTRUDER' THEN e.id END)   AS extruder_id,
+         MAX(CASE WHEN t.code = 'ETYPE-EXTRUDER' THEN e.name END) AS extruder_name,
+         MAX(CASE WHEN t.code = 'ETYPE-HAULOFF'  THEN e.id END)   AS haul_off_id,
+         MAX(CASE WHEN t.code = 'ETYPE-HAULOFF'  THEN e.name END) AS haul_off_name
+  FROM ppr_equipment_reading rd
+  JOIN ppr_equipment e ON e.id = rd.equipment_id
+  JOIN ppr_equipment_type t ON t.id = e.type_id
+  GROUP BY rd.batch_no
+) eq ON eq.batch_no = k.batch_no;
+
+-- 兼容别名：旧版脚本与报表按 v_ 前缀找视图（v_product_data_wide 等），
+-- 这里给出列完全一致的批次视图，方便沿用旧的查询习惯。
+CREATE OR REPLACE VIEW v_ppr_batch AS SELECT * FROM ppr_batch;
 
 -- 质量预警事件：由预警判定引擎按产品规格的标准区间自动产生，是后续诊断的入口。
 CREATE TABLE IF NOT EXISTS ppr_alert_event (
@@ -519,12 +573,8 @@ INSERT INTO ppr_equipment (id, code, name, type_id, line_name, status, descripti
   (2, 'EQ-HA-01', '1号牵引机', 2, '演示线 A', 'enabled', 'PPR管材牵引设备')
 ON DUPLICATE KEY UPDATE name=VALUES(name), type_id=VALUES(type_id), line_name=VALUES(line_name), status=VALUES(status);
 
-INSERT INTO ppr_batch (id, batch_no, spec_id, extruder_id, haul_off_id, production_group, start_time, end_time, status, data_source) VALUES
-  (1, '12121D0032', 1, 1, 2, '甲班', '2026-10-10 06:00:00', '2026-10-10 16:00:00', 'completed', 'MES'),
-  (2, '12121D0033', 1, 1, 2, '乙班', '2026-10-11 06:00:00', '2026-10-11 16:00:00', 'completed', 'MES'),
-  (3, '12121D0034', 1, 1, 2, '甲班', '2026-10-12 06:00:00', '2026-10-12 16:00:00', 'completed', 'MES'),
-  (4, '12121D0035', 2, 1, 2, '乙班', '2026-10-12 18:00:00', '2026-10-13 02:00:00', 'completed', 'MES')
-ON DUPLICATE KEY UPDATE spec_id=VALUES(spec_id), production_group=VALUES(production_group), start_time=VALUES(start_time), status=VALUES(status);
+-- 生产批次不预置数据：批次由产品检验数据 + 设备采集数据按批次号实时聚合出来（见 ppr_batch 视图），
+-- 没有检验记录或采集数据的批次号不会出现在批次清单里。
 
 INSERT INTO ppr_metric (id, code, name, unit, influences, description, status) VALUES
   (1, 'outer_diameter', '外径', 'mm', '定径套、真空度、冷却水温、牵引速度', '测量管材外径；判定限值取产品规格，正式判定以适用标准为准', 'enabled'),
@@ -532,24 +582,24 @@ INSERT INTO ppr_metric (id, code, name, unit, influences, description, status) V
   (3, 'ovality', '不圆度', 'mm', '定径冷却、支撑、牵引、测量截面', '同一样管同一截面最大外径减最小外径', 'enabled')
 ON DUPLICATE KEY UPDATE name=VALUES(name), unit=VALUES(unit), influences=VALUES(influences), status=VALUES(status);
 
-INSERT INTO ppr_product_measurement (id, record_no, sample_no, batch_id, inspect_time, outer_diameter_mm, min_wall_thickness_mm, max_wall_thickness_mm, max_outer_diameter_mm, min_outer_diameter_mm, ovality_mm, data_source, quality_flag, remark) VALUES
-  (1, 'IR-20261010-001', 'S-001', 1, '2026-10-10 08:20:00', 25.230, 4.320, 4.430, 25.310, 25.120, 0.190, 'QMS', 'normal', '基线点'),
-  (2, 'IR-20261010-002', 'S-002', 1, '2026-10-10 09:05:00', 25.240, 4.290, 4.410, 25.330, 25.110, 0.220, 'QMS', 'medium', '壁厚呈下降趋势'),
-  (3, 'IR-20261010-003', 'S-003', 1, '2026-10-10 09:37:00', 25.250, 4.260, 4.390, 25.350, 25.100, 0.250, 'QMS', 'medium', '壁厚趋近下限'),
-  (4, 'IR-20261010-004', 'S-004', 1, '2026-10-10 10:15:00', 25.260, 4.270, 4.420, 25.360, 25.120, 0.240, 'QMS', 'medium', '连续3点趋近下限，未越限'),
-  (5, 'IR-20261011-001', 'S-101', 2, '2026-10-11 08:00:00', 25.220, 4.340, 4.460, 25.320, 25.100, 0.220, 'QMS', 'normal', '参考批次'),
-  (6, 'IR-20261011-002', 'S-102', 2, '2026-10-11 09:00:00', 25.230, 4.330, 4.450, 25.550, 25.120, 0.430, 'QMS', 'high', '不圆度超过演示上限'),
-  (7, 'IR-20261011-003', 'S-103', 2, '2026-10-11 10:00:00', 25.240, 4.350, 4.470, 25.340, 25.110, 0.230, 'QMS', 'normal', '恢复正常'),
-  (8, 'IR-20261012-001', 'S-201', 3, '2026-10-12 08:00:00', 25.210, 4.360, 4.480, 25.310, 25.100, 0.210, 'QMS', 'normal', '参考批次'),
-  (9, 'IR-20261012-002', 'S-202', 3, '2026-10-12 09:00:00', 25.220, 4.380, 4.490, 25.320, 25.100, 0.220, 'QMS', 'normal', '参考批次'),
-  (10, 'IR-20261012-003', 'S-203', 3, '2026-10-12 10:00:00', 25.230, 4.370, 4.500, 25.330, 25.110, 0.220, 'QMS', 'normal', '参考批次'),
-  (11, 'IR-20261012-004', 'S-204', 3, '2026-10-12 11:00:00', 25.220, 4.390, 4.510, 25.320, 25.100, 0.220, 'QMS', 'normal', '参考批次'),
-  (12, 'IR-20261012-005', 'S-205', 3, '2026-10-12 12:00:00', 25.230, 4.380, 4.500, 25.330, 25.110, 0.220, 'QMS', 'normal', '参考批次'),
-  (13, 'IR-20261012-006', 'S-206', 3, '2026-10-12 13:00:00', 25.240, 4.390, 4.510, 25.340, 25.120, 0.220, 'QMS', 'normal', '参考批次'),
-  (14, 'IR-20261012-007', 'S-207', 3, '2026-10-12 14:00:00', 25.230, 4.370, 4.490, 25.330, 25.110, 0.220, 'QMS', 'normal', '参考批次'),
-  (15, 'IR-20261012-008', 'S-208', 3, '2026-10-12 15:00:00', 25.220, 4.380, 4.500, 25.320, 25.100, 0.220, 'QMS', 'normal', '参考批次'),
-  (16, 'IR-20261012-009', 'S-209', 4, '2026-10-12 20:00:00', 25.180, 4.310, 4.420, 25.280, 25.090, 0.190, 'MES_IMPORT', 'error', '记录值疑似跨规格录入')
-ON DUPLICATE KEY UPDATE sample_no=VALUES(sample_no), batch_id=VALUES(batch_id), inspect_time=VALUES(inspect_time), outer_diameter_mm=VALUES(outer_diameter_mm), min_wall_thickness_mm=VALUES(min_wall_thickness_mm), ovality_mm=VALUES(ovality_mm), quality_flag=VALUES(quality_flag), remark=VALUES(remark);
+INSERT INTO ppr_product_measurement (id, record_no, sample_no, batch_no, spec_id, production_group, batch_start_time, inspect_time, outer_diameter_mm, min_wall_thickness_mm, max_wall_thickness_mm, max_outer_diameter_mm, min_outer_diameter_mm, ovality_mm, data_source, quality_flag, remark) VALUES
+  (1, 'IR-20261010-001', 'S-001', '12121D0032', 1, '甲班', '2026-10-10 06:00:00', '2026-10-10 08:20:00', 25.230, 4.320, 4.430, 25.310, 25.120, 0.190, 'QMS', 'normal', '基线点'),
+  (2, 'IR-20261010-002', 'S-002', '12121D0032', 1, '甲班', '2026-10-10 06:00:00', '2026-10-10 09:05:00', 25.240, 4.290, 4.410, 25.330, 25.110, 0.220, 'QMS', 'medium', '壁厚呈下降趋势'),
+  (3, 'IR-20261010-003', 'S-003', '12121D0032', 1, '甲班', '2026-10-10 06:00:00', '2026-10-10 09:37:00', 25.250, 4.260, 4.390, 25.350, 25.100, 0.250, 'QMS', 'medium', '壁厚趋近下限'),
+  (4, 'IR-20261010-004', 'S-004', '12121D0032', 1, '甲班', '2026-10-10 06:00:00', '2026-10-10 10:15:00', 25.260, 4.270, 4.420, 25.360, 25.120, 0.240, 'QMS', 'medium', '连续3点趋近下限，未越限'),
+  (5, 'IR-20261011-001', 'S-101', '12121D0033', 1, '乙班', '2026-10-11 06:00:00', '2026-10-11 08:00:00', 25.220, 4.340, 4.460, 25.320, 25.100, 0.220, 'QMS', 'normal', '参考批次'),
+  (6, 'IR-20261011-002', 'S-102', '12121D0033', 1, '乙班', '2026-10-11 06:00:00', '2026-10-11 09:00:00', 25.230, 4.330, 4.450, 25.550, 25.120, 0.430, 'QMS', 'high', '不圆度超过演示上限'),
+  (7, 'IR-20261011-003', 'S-103', '12121D0033', 1, '乙班', '2026-10-11 06:00:00', '2026-10-11 10:00:00', 25.240, 4.350, 4.470, 25.340, 25.110, 0.230, 'QMS', 'normal', '恢复正常'),
+  (8, 'IR-20261012-001', 'S-201', '12121D0034', 1, '甲班', '2026-10-12 06:00:00', '2026-10-12 08:00:00', 25.210, 4.360, 4.480, 25.310, 25.100, 0.210, 'QMS', 'normal', '参考批次'),
+  (9, 'IR-20261012-002', 'S-202', '12121D0034', 1, '甲班', '2026-10-12 06:00:00', '2026-10-12 09:00:00', 25.220, 4.380, 4.490, 25.320, 25.100, 0.220, 'QMS', 'normal', '参考批次'),
+  (10, 'IR-20261012-003', 'S-203', '12121D0034', 1, '甲班', '2026-10-12 06:00:00', '2026-10-12 10:00:00', 25.230, 4.370, 4.500, 25.330, 25.110, 0.220, 'QMS', 'normal', '参考批次'),
+  (11, 'IR-20261012-004', 'S-204', '12121D0034', 1, '甲班', '2026-10-12 06:00:00', '2026-10-12 11:00:00', 25.220, 4.390, 4.510, 25.320, 25.100, 0.220, 'QMS', 'normal', '参考批次'),
+  (12, 'IR-20261012-005', 'S-205', '12121D0034', 1, '甲班', '2026-10-12 06:00:00', '2026-10-12 12:00:00', 25.230, 4.380, 4.500, 25.330, 25.110, 0.220, 'QMS', 'normal', '参考批次'),
+  (13, 'IR-20261012-006', 'S-206', '12121D0034', 1, '甲班', '2026-10-12 06:00:00', '2026-10-12 13:00:00', 25.240, 4.390, 4.510, 25.340, 25.120, 0.220, 'QMS', 'normal', '参考批次'),
+  (14, 'IR-20261012-007', 'S-207', '12121D0034', 1, '甲班', '2026-10-12 06:00:00', '2026-10-12 14:00:00', 25.230, 4.370, 4.490, 25.330, 25.110, 0.220, 'QMS', 'normal', '参考批次'),
+  (15, 'IR-20261012-008', 'S-208', '12121D0034', 1, '甲班', '2026-10-12 06:00:00', '2026-10-12 15:00:00', 25.220, 4.380, 4.500, 25.320, 25.100, 0.220, 'QMS', 'normal', '参考批次'),
+  (16, 'IR-20261012-009', 'S-209', '12121D0035', 2, '乙班', '2026-10-12 18:00:00', '2026-10-12 20:00:00', 25.180, 4.310, 4.420, 25.280, 25.090, 0.190, 'MES_IMPORT', 'error', '记录值疑似跨规格录入')
+ON DUPLICATE KEY UPDATE sample_no=VALUES(sample_no), batch_no=VALUES(batch_no), spec_id=VALUES(spec_id), inspect_time=VALUES(inspect_time), outer_diameter_mm=VALUES(outer_diameter_mm), min_wall_thickness_mm=VALUES(min_wall_thickness_mm), ovality_mm=VALUES(ovality_mm), quality_flag=VALUES(quality_flag), remark=VALUES(remark);
 
 -- 设备采集数据不预置演示数据：
 -- 采集数据现在挂在「设备台账 → 设备 → 生产批次 → 采集项」下，按批次导入。

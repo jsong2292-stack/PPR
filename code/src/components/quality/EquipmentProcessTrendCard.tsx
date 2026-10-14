@@ -20,7 +20,6 @@ interface EquipmentInfo {
   type_name: string;
   type_code: string;
 }
-interface LinkedEquipment { id: number; name: string; role: string }
 /** 一张「某采集项」的图：同一指标可能由多台设备采集，因此是多条曲线 */
 interface TrendChart {
   field: ReadingFieldKey;
@@ -32,7 +31,7 @@ interface TrendChart {
   markAnomaly: boolean;
 }
 interface BatchInfo {
-  id: number;
+  id: string;
   batch_no: string;
   spec_name?: string;
   production_group?: string;
@@ -69,9 +68,8 @@ const displayNumber = (value: unknown) => {
 };
 
 export interface EquipmentProcessTrendCardProps {
-  /** 当前异常事件所属批次；为 null 时不渲染 */
-  batchId: number | null;
-  batchNo?: string;
+  /** 当前异常事件所属批次号（批次不落表，批次号是唯一关联键）；为空时不渲染 */
+  batchNo: string | null;
   /** 当前异常事件的检验时刻，用于在图上标出异常样管被检验的位置 */
   alertTime?: string;
   /** 当前异常事件的指标名（如「不圆度」），仅用于说明文字 */
@@ -91,12 +89,11 @@ export interface EquipmentProcessTrendCardProps {
  * **检验时刻**，不是该样管在设备处的生产时刻。未完成生产时间、长度码、设备距离和
  * 检测延迟对齐前，这些曲线不能称为该样管的对应参数。
  */
-export function EquipmentProcessTrendCard({ batchId, batchNo, alertTime, alertMetricLabel }: EquipmentProcessTrendCardProps) {
+export function EquipmentProcessTrendCard({ batchNo, alertTime, alertMetricLabel }: EquipmentProcessTrendCardProps) {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [batch, setBatch] = useState<BatchInfo | null>(null);
   const [equipments, setEquipments] = useState<EquipmentInfo[]>([]);
-  const [linked, setLinked] = useState<LinkedEquipment[]>([]);
   const [readings, setReadings] = useState<Row[]>([]);
   const [windowMode, setWindowMode] = useState<'focus' | 'batch'>('focus');
   /** 被点开放大的采集项：null 表示不显示下方放大区，默认仍是三图并排对比 */
@@ -105,11 +102,11 @@ export function EquipmentProcessTrendCard({ batchId, batchNo, alertTime, alertMe
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
-    if (!batchId) { setBatch(null); setEquipments([]); setLinked([]); setReadings([]); return; }
+    if (!batchNo) { setBatch(null); setEquipments([]); setReadings([]); return; }
     setLoading(true);
     setError('');
     try {
-      const response = await fetch(`/api/quality/batches/${batchId}/equipment-readings`);
+      const response = await fetch(`/api/quality/batches/${encodeURIComponent(batchNo)}/equipment-readings`);
       // 先取文本再解析：路由未注册时服务端返回的是 HTML 404 页，
       // 直接 response.json() 只会抛出 "Unexpected token '<'" 这种看不懂的报错。
       const raw = await response.text();
@@ -122,17 +119,16 @@ export function EquipmentProcessTrendCard({ batchId, batchNo, alertTime, alertMe
       if (!response.ok) throw new Error(String(json.error || `加载设备采集数据失败（HTTP ${response.status}）`));
       setBatch((json.batch as BatchInfo) ?? null);
       setEquipments((json.equipments as EquipmentInfo[]) ?? []);
-      setLinked((json.linkedEquipment as LinkedEquipment[]) ?? []);
       setReadings((json.readings as Row[]) ?? []);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '加载失败');
-      setBatch(null); setEquipments([]); setLinked([]); setReadings([]);
+      setBatch(null); setEquipments([]); setReadings([]);
     } finally {
       setLoading(false);
     }
-  }, [batchId]);
+  }, [batchNo]);
 
-  useEffect(() => { setWindowMode('focus'); setZoomedField(null); void load(); }, [batchId, load]);
+  useEffect(() => { setWindowMode('focus'); setZoomedField(null); void load(); }, [batchNo, load]);
 
   const alertTs = useMemo(() => (alertTime ? toTime(alertTime) : null), [alertTime]);
 
@@ -211,7 +207,7 @@ export function EquipmentProcessTrendCard({ batchId, batchNo, alertTime, alertMe
     return dayLabel(Math.min(...times)) !== dayLabel(Math.max(...times));
   }, [visible]);
 
-  if (!batchId) return null;
+  if (!batchNo) return null;
 
   const isFocus = windowMode === 'focus' && alertTs !== null;
   const focusedEmpty = isFocus && visible.length === 0 && readings.length > 0;
@@ -280,7 +276,7 @@ export function EquipmentProcessTrendCard({ batchId, batchNo, alertTime, alertMe
     <CardContent className="space-y-4 p-5">
       {loading ? <div className="grid h-48 place-items-center"><Loader2 className="animate-spin text-blue-700" /></div>
         : error ? <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
-        : readings.length === 0 ? <EmptyState linked={linked} batchNo={batch?.batch_no ?? batchNo} isAdmin={isAdmin} />
+        : readings.length === 0 ? <EmptyState batchNo={batch?.batch_no ?? batchNo} isAdmin={isAdmin} />
         : <>
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <AlertTriangle size={14} className="shrink-0" />
@@ -359,24 +355,20 @@ export function EquipmentProcessTrendCard({ batchId, batchNo, alertTime, alertMe
   </Card>;
 }
 
-/** 空状态：把「本批次登记了哪些设备、要去哪里补数据」说清楚，而不是只显示一句无数据 */
-function EmptyState({ linked, batchNo, isAdmin }: { linked: LinkedEquipment[]; batchNo?: string; isAdmin: boolean }) {
+/** 空状态：说清楚「该批次还没有采集数据」以及要去哪里补数据，而不是只显示一句无数据 */
+function EmptyState({ batchNo, isAdmin }: { batchNo?: string; isAdmin: boolean }) {
   return <div className="rounded-xl border border-dashed border-slate-300 p-6 text-center">
     <TrendingUp className="mx-auto mb-3 text-slate-400" size={22} />
     <b className="text-slate-700">该批次还没有设备采集数据</b>
     <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-slate-500">
-      {linked.length
-        ? <>批次 {batchNo ?? '—'} 登记的设备：{linked.map((item) => `${item.role}「${item.name}」`).join('、')}。</>
-        : <>批次 {batchNo ?? '—'} 尚未在批次基础信息里关联挤出机 / 牵引机。</>}
-      采集数据按「设备台账 → 设备 → 生产批次 → 采集项」逐级维护，可在该页下载模板后 Excel 导入；
-      采集项由设备类型决定（挤出机=温度、压力，牵引机=牵引速度）。
+      批次 {batchNo ?? '—'} 下还没有任何设备的采集记录。采集数据按「设备台账 → 设备 → 生产批次 → 采集项」逐级 Excel 导入；
+      采集项由设备类型决定（挤出机=温度、压力，牵引机=牵引速度）。批次清单里的「关联设备」就是由这些采集数据反推出来的。
     </p>
     <p className="mt-3 text-xs text-slate-400">
-      {isAdmin ? '前往' : '请由管理员前往'}「数据源管理 / 设备台账」
-      {linked[0] ? ` → ${linked[0].name} → 批次 ${batchNo ?? ''}` : ''} 补录
+      {isAdmin ? '前往' : '请由管理员前往'}「数据源管理 / 设备台账」选择对应设备后导入采集数据。
     </p>
-    {isAdmin && linked[0] ? <Button asChild size="sm" variant="outline" className="mt-3">
-      <Link href={`/quality/data/equipment/${linked[0].id}`}>打开设备台账</Link>
+    {isAdmin ? <Button asChild size="sm" variant="outline" className="mt-3">
+      <Link href="/quality/data/equipment">打开设备台账</Link>
     </Button> : null}
   </div>;
 }

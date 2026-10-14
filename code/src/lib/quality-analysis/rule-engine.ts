@@ -16,10 +16,10 @@ export async function generateRuleAnalysis(
   if (!alert) throw new Error('预警事件不存在');
   await reportAnalysisProgress(reporter, { stage: 'rule', status: 'running', message: '正在关联同批次产品趋势与按检验时刻距离排序的设备数据' });
   const measurements = await dbClient.queryAll<Row>(`SELECT * FROM ppr_product_measurement
-    WHERE batch_id=? AND inspect_time<=? ORDER BY inspect_time DESC LIMIT 5`, [alert.batch_id, alert.inspect_time]);
+    WHERE batch_no=? AND inspect_time<=? ORDER BY inspect_time DESC LIMIT 5`, [alert.batch_no, alert.inspect_time]);
   const readings = await dbClient.queryAll<Row>(`SELECT r.*, e.name AS equipment_name
     FROM ppr_equipment_reading r JOIN ppr_equipment e ON e.id=r.equipment_id
-    WHERE r.batch_id=? ORDER BY ABS(TIMESTAMPDIFF(MINUTE,r.collect_time,?)) LIMIT 4`, [alert.batch_id, alert.inspect_time]);
+    WHERE r.batch_no=? ORDER BY ABS(TIMESTAMPDIFF(MINUTE,r.collect_time,?)) LIMIT 4`, [alert.batch_no, alert.inspect_time]);
   const metric = String(alert.metric_code);
   const valueMap: Record<string, string> = { outer_diameter: 'outer_diameter_mm', min_wall_thickness: 'min_wall_thickness_mm', ovality: 'ovality_mm' };
   const key = valueMap[metric] || 'outer_diameter_mm';

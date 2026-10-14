@@ -1,18 +1,19 @@
 /**
  * 生成「设备采集数据」的模拟导入 Excel。
  *
- * 采集数据改成「设备台账 → 设备 → 生产批次 → 采集项」下按批次导入后，
+ * 采集数据在「设备台账 → 设备 → 导入采集数据（选批次号）」里按批次导入，
  * 每个文件的列头必须和该设备类型的专用模板完全一致（记录编号、批次号、设备都不用填），
- * 所以这里直接从库里读批次与设备类型，按类型生成对应的数据项列。
+ * 所以这里直接从库里读批次号（来自检验记录）与设备（按类型），生成对应的数据项列。
  *
  * 输出（默认 <repo>/PPR/测试数据/设备采集模拟数据/）：
- *   12121D0032-挤出机-温度压力.xlsx
- *   12121D0032-牵引机-牵引速度.xlsx
+ *   12121D0050-挤出机-温度压力.xlsx
+ *   12121D0050-牵引机-牵引速度.xlsx
  *   ...
  *
  * 用法：
  *   node scripts/generate-reading-demo.js                    # 输出到默认目录
  *   node scripts/generate-reading-demo.js /tmp/reading-demo  # 指定输出目录
+ *   node scripts/generate-reading-demo.js --equipment 1,2    # 只为一号挤出机与一号牵引机生成
  */
 const fs = require('fs');
 const path = require('path');
@@ -113,39 +114,50 @@ async function main() {
 
   const connection = await mysql.createConnection({ ...config, charset: 'utf8mb4_unicode_ci', timezone: 'Z' });
   try {
-    // 按「批次 × 关联设备」取数：批次表的 extruder_id / haul_off_id 指向哪台设备，就为那台设备生成一份文件。
+    // 批次清单来自检验记录（批次号是唯一关联键、批次不落表）；
+    // 设备不再由批次记录归属，而是取「有采集项的设备类型」下的全部在用设备（可用 --equipment 过滤）。
+    // 旧实现从视图的 extruder_id / haul_off_id 取设备，而那两个字段恰恰是采集数据反推出来的，
+    // 会形成「必须先有采集数据才能生成采集数据」的死循环，新批次永远生成不出来。
     const [rows] = await connection.query(`
-      SELECT b.id AS batch_id, b.batch_no, b.start_time, b.end_time,
-             ex.id AS extruder_id, ex.name AS extruder_name, ext.code AS extruder_type_code,
-             ha.id AS haul_off_id, ha.name AS haul_off_name, hat.code AS haul_off_type_code
-      FROM ppr_batch b
-      LEFT JOIN ppr_equipment ex ON ex.id = b.extruder_id
-      LEFT JOIN ppr_equipment_type ext ON ext.id = ex.type_id
-      LEFT JOIN ppr_equipment ha ON ha.id = b.haul_off_id
-      LEFT JOIN ppr_equipment_type hat ON hat.id = ha.type_id
-      ORDER BY b.start_time, b.id`);
+      SELECT batch_no,
+             MIN(COALESCE(batch_start_time, inspect_time)) AS start_time,
+             MAX(inspect_time)                             AS end_time
+      FROM ppr_product_measurement
+      GROUP BY batch_no
+      ORDER BY start_time, batch_no`);
 
     if (!rows.length) {
-      console.error('库里没有生产批次，先生成批次后再运行。');
+      console.error('库里没有检验记录（批次号清单由检验记录聚合），请先导入产品数据。');
       process.exit(1);
     }
+
+    const equipmentArgIndex = process.argv.indexOf('--equipment');
+    const equipmentFilter = equipmentArgIndex >= 0
+      ? new Set(String(process.argv[equipmentArgIndex + 1] || '').split(',').map((value) => Number(value.trim())).filter(Boolean))
+      : null;
+
+    const [equipmentRows] = await connection.query(`
+      SELECT e.id, e.name, t.code AS type_code
+      FROM ppr_equipment e
+      JOIN ppr_equipment_type t ON t.id = e.type_id
+      WHERE t.code IN ('ETYPE-EXTRUDER', 'ETYPE-HAULOFF') AND e.status <> 'disabled'
+      ORDER BY e.id`);
+    const devices = equipmentRows
+      .filter((device) => TYPE_FIELDS[device.type_code] && (!equipmentFilter || equipmentFilter.has(device.id)))
+      .map((device) => ({ id: device.id, name: device.name, typeCode: device.type_code }));
+    if (!devices.length) {
+      console.error('没有可生成采集数据的设备（需要挤出机 / 牵引机类型的在用设备）。');
+      process.exit(1);
+    }
+    console.log(`批次 ${rows.length} 个 × 设备 ${devices.length} 台（${devices.map((device) => device.name).join('、')}）`);
 
     fs.mkdirSync(outDir, { recursive: true });
     let written = 0;
     let seed = 0;
 
     for (const row of rows) {
-      const devices = [
-        { id: row.extruder_id, name: row.extruder_name, typeCode: row.extruder_type_code },
-        { id: row.haul_off_id, name: row.haul_off_name, typeCode: row.haul_off_type_code },
-      ].filter((device) => device.id);
-
       for (const device of devices) {
         const spec = TYPE_FIELDS[device.typeCode];
-        if (!spec) {
-          console.warn(`跳过：批次 ${row.batch_no} 的 ${device.name}（类型 ${device.typeCode} 未定义采集项）`);
-          continue;
-        }
         const times = collectTimes(row.start_time, row.end_time);
         if (!times.length) {
           console.warn(`跳过：批次 ${row.batch_no} × ${device.name}（时间区间内排不出采集时刻）`);

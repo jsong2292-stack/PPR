@@ -8,6 +8,8 @@
 -- MySQL 需先关闭外键检查，才能按任意顺序删除存在外键关联的表
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP VIEW IF EXISTS v_ppr_batch;
+DROP VIEW IF EXISTS ppr_batch;
 DROP TABLE IF EXISTS ppr_history_archive;
 DROP TABLE IF EXISTS ppr_eight_d_report;
 DROP TABLE IF EXISTS ppr_analysis_conclusion;

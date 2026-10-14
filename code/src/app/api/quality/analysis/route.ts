@@ -25,10 +25,10 @@ async function getRun(runId?: number, alertId?: number) {
   const value = runId || alertId;
   const run = await dbClient.queryOne<Row>(`SELECT r.*, a.event_no, a.metric_code, a.risk_level, a.rule_name,
     a.observed_value, a.threshold_text, m.record_no, m.sample_no, m.inspect_time,
-    b.batch_no, b.production_group, s.name AS spec_name
+    m.batch_no, m.production_group, s.name AS spec_name
     FROM ppr_analysis_run r JOIN ppr_alert_event a ON a.id=r.alert_id
     JOIN ppr_product_measurement m ON m.id=a.measurement_id
-    JOIN ppr_batch b ON b.id=m.batch_id JOIN ppr_product_spec s ON s.id=b.spec_id
+    JOIN ppr_product_spec s ON s.id=m.spec_id
     WHERE ${condition} ORDER BY r.id DESC LIMIT 1`, value ? [value] : []);
   if (!run) return null;
   const conclusions = await dbClient.queryAll<Row>('SELECT * FROM ppr_analysis_conclusion WHERE analysis_id=? ORDER BY sort_no,id', [run.id]);

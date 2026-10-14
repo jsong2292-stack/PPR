@@ -1,0 +1,20 @@
+# 构建上下文排除：避免把本机依赖/产物/密钥打进镜像
+node_modules
+**/node_modules
+.next
+dist
+tsconfig.tsbuildinfo
+.git
+.gitignore
+.DS_Store
+**/.DS_Store
+npm-debug.log*
+pnpm-debug.log*
+# 本地环境变量不入镜像（构建期通过 --build-arg / 运行时环境变量注入）
+.env
+.env.local
+.env.*.local
+doc
+code
+原型
+测试数据

@@ -78,18 +78,20 @@ export interface AlertEvaluationSummary {
   normal: number;
 }
 
-interface MeasurementRow extends Row {
+/** 判定输入行：检验记录 + 所属规格的限值（导出供离线校验复用）。 */
+export interface MeasurementRow extends Row {
   id: number;
   record_no: string;
-  batch_id: number;
-  /** 批次号与规格名，仅用于企微推送消息的可读上下文。 */
-  batch_no?: string;
+  /** 批次号是唯一的批次关联键（字符串），分组与推送上下文都用它。 */
+  batch_no: string;
+  /** 规格名，仅用于企微推送消息的可读上下文。 */
   spec_name?: string;
   inspect_time: Date | string;
   quality_flag: string;
 }
 
-interface PlannedAlert {
+/** 判定产出的单条事件（导出供离线校验复用）。 */
+export interface PlannedAlert {
   eventNo: string;
   measurementId: number;
   metricCode: string;
@@ -200,8 +202,11 @@ function buildPushItem(id: number, alert: PlannedAlert, row: MeasurementRow | un
   };
 }
 
-/** 判定单个批次，返回该批次应重建的全部事件。 */
-function planBatch(batchRows: MeasurementRow[]): { alerts: PlannedAlert[]; levels: Map<number, AlertLevel> } {
+/**
+ * 判定单个批次，返回该批次应重建的全部事件。
+ * 导出供离线校验使用（scripts/demo-data/verify-alert-demo.js）：纯函数、无副作用，可单独验证规则。
+ */
+export function planBatch(batchRows: MeasurementRow[]): { alerts: PlannedAlert[]; levels: Map<number, AlertLevel> } {
   const alerts: PlannedAlert[] = [];
   const levels = new Map<number, AlertLevel>();
 
@@ -296,29 +301,29 @@ function emptySummary(): AlertEvaluationSummary {
 
 /**
  * 重算预警事件。
- * 不传 batchIds 表示全量重算；传批次ID数组只重算这些批次（导入、编辑、删除后按需触发）。
+ * 不传 batchNos 表示全量重算；传批次号数组只重算这些批次（导入、编辑、删除后按需触发）。
  */
-export async function evaluateAlerts(options: { batchIds?: number[] } = {}): Promise<AlertEvaluationSummary> {
-  const batchIds = options.batchIds?.filter((id) => Number.isFinite(id));
-  if (batchIds && batchIds.length === 0) return emptySummary();
+export async function evaluateAlerts(options: { batchNos?: string[] } = {}): Promise<AlertEvaluationSummary> {
+  const batchNos = options.batchNos?.map((no) => String(no)).filter((no) => no.length > 0);
+  if (batchNos && batchNos.length === 0) return emptySummary();
 
-  const where = batchIds && batchIds.length ? `WHERE m.batch_id IN (${batchIds.map(() => '?').join(',')})` : '';
-  const rows = await dbClient.queryAll<MeasurementRow>(`SELECT m.id, m.record_no, m.batch_id, m.inspect_time, m.quality_flag,
+  // 批次不再落表：批次号与生产班组直接取检验记录自身，规格限值按记录自己的 spec_id 关联。
+  const where = batchNos && batchNos.length ? `WHERE m.batch_no IN (${batchNos.map(() => '?').join(',')})` : '';
+  const rows = await dbClient.queryAll<MeasurementRow>(`SELECT m.id, m.record_no, m.batch_no, m.inspect_time, m.quality_flag,
     m.outer_diameter_mm, m.min_wall_thickness_mm, m.ovality_mm,
-    b.batch_no, s.name AS spec_name,
+    s.name AS spec_name,
     s.outer_lower_mm, s.outer_upper_mm, s.wall_lower_mm, s.wall_upper_mm, s.ovality_upper_mm
     FROM ppr_product_measurement m
-    JOIN ppr_batch b ON b.id = m.batch_id
-    JOIN ppr_product_spec s ON s.id = b.spec_id
+    JOIN ppr_product_spec s ON s.id = m.spec_id
     ${where}
-    ORDER BY m.batch_id, m.inspect_time, m.id`, batchIds ?? []);
+    ORDER BY m.batch_no, m.inspect_time, m.id`, batchNos ?? []);
   if (!rows.length) return emptySummary();
 
-  const grouped = new Map<number, MeasurementRow[]>();
+  const grouped = new Map<string, MeasurementRow[]>();
   for (const row of rows) {
-    const bucket = grouped.get(Number(row.batch_id));
+    const bucket = grouped.get(row.batch_no);
     if (bucket) bucket.push(row);
-    else grouped.set(Number(row.batch_id), [row]);
+    else grouped.set(row.batch_no, [row]);
   }
 
   const alerts: PlannedAlert[] = [];
@@ -468,8 +473,8 @@ export async function evaluateAlerts(options: { batchIds?: number[] } = {}): Pro
 }
 
 export type AlertRefreshTarget = {
-  /** 只重算这些批次。 */
-  batchIds?: number[];
+  /** 只重算这些批次（批次号字符串）。 */
+  batchNos?: string[];
   /** 重算该产品规格下的全部批次（规格限值被改动时使用）。 */
   specId?: number;
 };
@@ -480,14 +485,16 @@ export type AlertRefreshTarget = {
  */
 export async function refreshAlertsQuietly(target: AlertRefreshTarget): Promise<AlertEvaluationSummary | null> {
   try {
-    let batchIds = target.batchIds ?? [];
+    const batchNos = [...(target.batchNos ?? [])];
     if (target.specId) {
-      const batches = await dbClient.queryAll<{ id: number }>('SELECT id FROM ppr_batch WHERE spec_id=?', [target.specId]);
-      batchIds = [...batchIds, ...batches.map((batch) => Number(batch.id))];
+      // 批次不落表，规格下的批次号直接从检验记录里取。
+      const batches = await dbClient.queryAll<{ batch_no: string }>(
+        'SELECT DISTINCT batch_no FROM ppr_product_measurement WHERE spec_id=?', [target.specId]);
+      batchNos.push(...batches.map((batch) => batch.batch_no));
     }
-    const unique = [...new Set(batchIds.map(Number).filter((id) => Number.isFinite(id) && id > 0))];
+    const unique = [...new Set(batchNos.map((no) => String(no).trim()).filter((no) => no.length > 0))];
     if (!unique.length) return null;
-    return await evaluateAlerts({ batchIds: unique });
+    return await evaluateAlerts({ batchNos: unique });
   } catch (cause) {
     console.error('quality alert refresh failed', cause);
     return null;

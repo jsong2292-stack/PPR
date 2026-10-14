@@ -27,7 +27,7 @@
 - **规则引擎模式**：后端固定读取当前预警、同批次异常时刻及之前最多 5 条检验记录，以及同批次中按检验时刻距离排序的最近 4 条设备记录，按固定模板输出 3 条结论，不调用外部模型；
 - **LangChain Agent 模式**：模型先获得事件编号、触发规则和异常指标，再自主调用 5 个只读工具取证，最后输出 2～6 条结构化待验证结论；
 - **共同边界**：两种模式都只形成排查线索，不自动确认根因，不自动作产品处置，不绕过工程师复核；
-- **数据联动方式**：以 `alertId` 为入口，经“预警事件 → 检验记录 → 批次 → 产品规格”锁定范围，再按 `batch_id`、`inspect_time`、`spec_id`、`metric_code`关联趋势、设备、参考批次和指标字典；
+- **数据联动方式**：以 `alertId` 为入口，经“预警事件 → 检验记录 → 批次号（`ppr_batch` 是按批次号实时聚合的视图）→ 产品规格”锁定范围，再按 `batch_no`、`inspect_time`、`spec_id`、`metric_code`关联趋势、设备、参考批次和指标字典；
 - **Agent 专业逻辑**：V2.0 Prompt 按“测量有效性 → 异常形态 → 三层对照 → 时间对齐 → 成型链/材料链竞争假设 → 反证与受控验证”分析，外径不再与单一工艺参数直接对应；
 - **外部数据传输**：只有 Agent 模式会把提示词和被工具取回的业务数据发送到所配置的模型端点；规则模式不调用外部模型。
 
@@ -275,8 +275,8 @@ Agent 启动前，后端会先用 `alertId` 查询上下文。查询链路为：
 ```text
 ppr_alert_event a
   -- a.measurement_id = m.id --> ppr_product_measurement m
-  -- m.batch_id = b.id       --> ppr_batch b
-  -- b.spec_id = s.id        --> ppr_product_spec s
+  -- m.spec_id = s.id        --> ppr_product_spec s
+  （批次号 m.batch_no 直接落在检验记录上；需要批次维度时再查 ppr_batch 视图，视图按 batch_no 聚合）
 ```
 
 查询结果包括：
@@ -285,12 +285,12 @@ ppr_alert_event a
 - 触发规则及风险级别；
 - 异常指标和观测值；
 - 触发检验记录、样管、检验时间；
-- 所属批次、生产组别、规格；
+- 所属批次号、生产组别、规格（批次号与生产组别直接取检验记录，规格取记录自己的 `spec_id`）；
 - 当前规格的外径、壁厚及不圆度限值；
 - 当前记录中的外径、壁厚、不圆度及同截面最大/最小外径；
 - 数据来源。
 
-该上下文在后端形成 `context` 闭包，用来限定所有工具的查询范围。模型不能自行改写 `batch_id`、`spec_id`、`metric_code` 或异常时间。
+该上下文在后端形成 `context` 闭包，用来限定所有工具的查询范围。模型不能自行改写 `batch_no`、`spec_id`、`metric_code` 或异常时间。
 
 需要注意，完整 `context` 仍会在模型调用 `get_alert_context` 后作为工具结果返回给模型。因此，“启动前由后端预加载”不等于“不会发送到模型端”。
 
@@ -575,17 +575,17 @@ Agent 不具备直接执行 SQL 的能力，不能提交表名、列名、任意
 - 仅查询当前预警的 `metric_code`；
 - 无法通过模型传入其他指标编码；
 - 指标名称、单位、影响因素和说明来自 `ppr_metric`；
-- 判定上下限来自当前批次关联的 `ppr_product_spec`，不使用 `ppr_metric` 中已弃用的通用限值列；
+- 判定上下限来自当前检验记录 `spec_id` 关联的 `ppr_product_spec`，不使用 `ppr_metric` 中已弃用的通用限值列；
 - 返回值会附带 `limit_source='产品规格（ppr_product_spec）标准限值'`。
 
 ## 8.6 工具与数据表映射
 
 | 工具 | 主要数据表 | 关联键/过滤条件 | 返回给模型的主要字段 |
 |---|---|---|---|
-| `get_alert_context` | `ppr_alert_event`、`ppr_product_measurement`、`ppr_batch`、`ppr_product_spec` | `alertId` → `measurement_id` → `batch_id` → `spec_id` | 事件、规则、风险、样管、批次、规格限值、当前测量值、来源 |
-| `get_batch_measurements` | `ppr_product_measurement` | 固定当前 `batch_id`；`inspect_time <= 异常时间`；3～30 条 | 产品尺寸序列、样管、质量标记、来源、备注 |
-| `get_equipment_window` | `ppr_equipment_reading`、`ppr_equipment`、`ppr_equipment_type` | 固定当前 `batch_id`；异常时间前后 30～1440 分钟 | 温度、压力、牵引速度、设备、来源、备注 |
-| `get_reference_measurements` | `ppr_product_measurement`、`ppr_batch` | 同 `spec_id`、排除当前 `batch_id`、`quality_flag='normal'`；3～50 条 | 其他正常批次的代表性/最大/最小外径、最大/最小壁厚、不圆度和生产组别 |
+| `get_alert_context` | `ppr_alert_event`、`ppr_product_measurement`、`ppr_product_spec`（批次号落在检验记录上，批次维度由 `ppr_batch` 视图聚合） | `alertId` → `measurement_id` → `batch_no` / `spec_id`（批次号与规格都直接落在检验记录上） | 事件、规则、风险、样管、批次号、规格限值、当前测量值、来源 |
+| `get_batch_measurements` | `ppr_product_measurement` | 固定当前 `batch_no`（批次号字符串）；`inspect_time <= 异常时间`；3～30 条 | 产品尺寸序列、样管、质量标记、来源、备注 |
+| `get_equipment_window` | `ppr_equipment_reading`、`ppr_equipment`、`ppr_equipment_type` | 固定当前 `batch_no`（与检验记录按批次号字符串关联）；异常时间前后 30～1440 分钟 | 温度、压力、牵引速度、设备、来源、备注 |
+| `get_reference_measurements` | `ppr_product_measurement` | 同 `spec_id`、排除当前 `batch_no`（批次号取自检验记录本身）、`quality_flag='normal'`；3～50 条 | 其他正常批次的代表性/最大/最小外径、最大/最小壁厚、不圆度和生产组别 |
 | `get_metric_definition` | `ppr_metric` + 当前 `context` 中的规格字段 | 固定当前 `metric_code` 和 `spec_id` | 指标定义、可能影响因素、当前规格上下限 |
 
 工具结果不会在前端实时过程面板中逐字段展示，过程面板只显示工具名称、输入摘要、返回记录数和耗时；完整工具输出会进入模型上下文，并写入 `tool_trace_json` 和 `evidence_snapshot` 供审计。
@@ -594,9 +594,9 @@ Agent 不具备直接执行 SQL 的能力，不能提交表名、列名、任意
 
 ```mermaid
 erDiagram
-    ppr_product_spec ||--o{ ppr_batch : "spec_id"
-    ppr_batch ||--o{ ppr_product_measurement : "batch_id"
-    ppr_batch ||--o{ ppr_equipment_reading : "batch_id"
+    %% ppr_batch 已不是表，而是按 batch_no 实时聚合两张子表的只读视图，不参与外键关联
+    ppr_product_spec ||--o{ ppr_product_measurement : "spec_id"
+    ppr_product_measurement }o--o{ ppr_equipment_reading : "batch_no（批次号字符串关联键）"
     ppr_equipment ||--o{ ppr_equipment_reading : "equipment_id"
     ppr_product_measurement ||--o{ ppr_alert_event : "measurement_id"
     ppr_alert_event ||--o{ ppr_analysis_run : "alert_id"
@@ -606,9 +606,9 @@ erDiagram
 联动口径如下：
 
 - **预警与原始检验**：通过 `measurement_id` 精确关联到触发预警的单条产品检验记录；
-- **产品趋势**：通过同一 `batch_id` 关联，且 Agent 工具只看异常时刻及之前的记录；
-- **同期设备**：通过同一 `batch_id` 关联，再按设备采集时间与检验时间的距离筛选；当前实现不是按样管 ID 或工位节拍做精确时序匹配；
-- **参考批次**：通过同一 `spec_id` 关联，排除当前批次，并依赖 `quality_flag='normal'`；
+- **产品趋势**：通过同一 `batch_no`（批次号字符串）关联，且 Agent 工具只看异常时刻及之前的记录；
+- **同期设备**：通过同一 `batch_no` 关联，再按设备采集时间与检验时间的距离筛选；当前实现不是按样管 ID 或工位节拍做精确时序匹配；
+- **参考批次**：通过同一 `spec_id` 关联，排除当前 `batch_no`，并依赖 `quality_flag='normal'`；
 - **指标口径**：通过当前事件的 `metric_code` 读取指标字典；
 - **正式限值**：代码取 `ppr_product_spec`，不取指标字典中的历史通用限值列；但这些限值在 DDL 注释中仍标为“演示限值”，是否可用于正式判定需要业务确认。
 
@@ -1054,8 +1054,8 @@ reviewing
 
 | 触发动作 | 自动行为 | 是否自动重跑已有分析 |
 |---|---|---:|
-| 新增、编辑或删除产品检验数据 | 按受影响的 `batch_id` 重算预警；Excel 导入逐行调用同一新增接口，因此逐行触发重算 | 否 |
-| 修改产品规格限值 | 查出该 `spec_id` 下所有批次并重算预警 | 否 |
+| 新增、编辑或删除产品检验数据 | 按受影响的批次号（`batch_no`）重算预警；Excel 导入逐行调用同一新增接口，因此逐行触发重算 | 否 |
+| 修改产品规格限值 | 查出该 `spec_id` 下所有批次号（`SELECT DISTINCT batch_no FROM ppr_product_measurement WHERE spec_id=?`）并重算预警 | 否 |
 | 手工点击“重新扫描” | 全量重算预警并处理通知队列 | 否 |
 | 新增或修改设备采集数据 | 当前代码不触发预警重算 | 否 |
 | 诊断页点击“生成分析” | 没有现有分析时生成并入库 | 是，本次生成 |
@@ -1102,7 +1102,7 @@ Agent 本身不能访问数据库连接对象，所有查询必须通过预定�
 - 表名；
 - SQL；
 - 任意字段名；
-- 任意批次 ID；
+- 任意批次号；
 - 任意规格 ID；
 - 任意指标编码。
 

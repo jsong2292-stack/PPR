@@ -9,17 +9,18 @@ export async function GET() {
   try {
     const [alerts, measurements, stats] = await Promise.all([
       // 只取判定引擎产出的事件（source='engine'）；legacy 是历史演示行，仅用于维持归档报告的追溯链。
+      // 批次不落表：批次号/生产班组取自检验记录，规格按记录自己的 spec_id 关联。
       dbClient.queryAll(`SELECT a.*, m.record_no, m.sample_no, m.inspect_time, m.outer_diameter_mm,
-        m.min_wall_thickness_mm, m.ovality_mm, m.data_source, b.batch_no, b.id AS batch_id, b.production_group,
+        m.min_wall_thickness_mm, m.ovality_mm, m.data_source, m.batch_no, m.production_group,
         s.name AS spec_name, s.outer_lower_mm, s.outer_upper_mm, s.wall_lower_mm, s.wall_upper_mm, s.ovality_upper_mm
         FROM ppr_alert_event a JOIN ppr_product_measurement m ON m.id=a.measurement_id
-        JOIN ppr_batch b ON b.id=m.batch_id JOIN ppr_product_spec s ON s.id=b.spec_id
+        JOIN ppr_product_spec s ON s.id=m.spec_id
         WHERE a.source='engine'
         ORDER BY a.risk_level='normal', a.detected_at DESC`),
-      dbClient.queryAll(`SELECT m.*, b.batch_no, s.id AS spec_id, s.code AS spec_code, s.name AS spec_name,
+      dbClient.queryAll(`SELECT m.*, s.id AS spec_id, s.code AS spec_code, s.name AS spec_name,
         s.outer_lower_mm, s.outer_upper_mm, s.wall_lower_mm, s.wall_upper_mm, s.ovality_upper_mm
         FROM ppr_product_measurement m
-        JOIN ppr_batch b ON b.id=m.batch_id JOIN ppr_product_spec s ON s.id=b.spec_id ORDER BY m.inspect_time ASC`),
+        JOIN ppr_product_spec s ON s.id=m.spec_id ORDER BY m.inspect_time ASC`),
       dbClient.queryOne(`SELECT
         (SELECT COUNT(*) FROM ppr_product_measurement) AS measurement_count,
         (SELECT COUNT(*) FROM ppr_alert_event WHERE source='engine' AND status<>'closed') AS open_alert_count,

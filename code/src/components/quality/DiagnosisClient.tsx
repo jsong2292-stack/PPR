@@ -256,11 +256,10 @@ export function DiagnosisClient() {
     {/* 趋势图跟随所选事件：key 绑定事件 id，切换事件即重置视图并自动定位到该事件的异常指标、规格与批次。 */}
     {selected && <MetricTrendCard key={alertId} measurements={measurements} focus={{ metricCode: String(selected.metric_code ?? ''), specName: String(selected.spec_name ?? ''), batchNo: String(selected.batch_no ?? '') }} />}
 
-    {/* 设备参数图跟随「批次」而不是「事件」：同批次切换事件时不重新取数，只移动异常时刻标线。 */}
+    {/* 设备参数图按「批次号」跟随而不是按「事件」：同批次切换事件时不重新取数，只移动异常时刻标线。 */}
     {selected && <EquipmentProcessTrendCard
-      key={`equipment-${String(selected.batch_id ?? selected.batch_no ?? '')}`}
-      batchId={toNumber(selected.batch_id)}
-      batchNo={String(selected.batch_no ?? '')}
+      key={`equipment-${String(selected.batch_no ?? '')}`}
+      batchNo={selected.batch_no ? String(selected.batch_no) : null}
       alertTime={String(selected.inspect_time ?? '')}
       alertMetricLabel={metricLabels[String(selected.metric_code ?? '')]}
     />}

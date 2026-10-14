@@ -7,11 +7,12 @@ type Row = Record<string, unknown>;
 
 async function queryReport(analysisId?: number) {
   const where = analysisId ? 'WHERE r.analysis_id=?' : '';
+  // 批次不落表：批次号取自检验记录，规格按记录自己的 spec_id 关联。
   return dbClient.queryOne<Row>(`SELECT r.*, a.run_no, a.summary, a.alert_id, e.event_no, e.metric_code, e.risk_level,
-    b.batch_no, s.name AS spec_name FROM ppr_eight_d_report r
+    m.batch_no, s.name AS spec_name FROM ppr_eight_d_report r
     JOIN ppr_analysis_run a ON a.id=r.analysis_id JOIN ppr_alert_event e ON e.id=a.alert_id
-    JOIN ppr_product_measurement m ON m.id=e.measurement_id JOIN ppr_batch b ON b.id=m.batch_id
-    JOIN ppr_product_spec s ON s.id=b.spec_id ${where} ORDER BY r.id DESC LIMIT 1`, analysisId ? [analysisId] : []);
+    JOIN ppr_product_measurement m ON m.id=e.measurement_id
+    JOIN ppr_product_spec s ON s.id=m.spec_id ${where} ORDER BY r.id DESC LIMIT 1`, analysisId ? [analysisId] : []);
 }
 
 export async function GET(request: NextRequest) {
@@ -33,9 +34,9 @@ export async function POST(request: NextRequest) {
     const existing = await queryReport(analysisId);
     if (!existing) {
       const analysis = await dbClient.queryOne<Row>(`SELECT a.*, e.event_no, e.rule_name, e.metric_code, e.risk_level,
-        e.threshold_text, b.batch_no, b.production_group, s.name AS spec_name FROM ppr_analysis_run a
+        e.threshold_text, m.batch_no, m.production_group, s.name AS spec_name FROM ppr_analysis_run a
         JOIN ppr_alert_event e ON e.id=a.alert_id JOIN ppr_product_measurement m ON m.id=e.measurement_id
-        JOIN ppr_batch b ON b.id=m.batch_id JOIN ppr_product_spec s ON s.id=b.spec_id WHERE a.id=?`, [analysisId]);
+        JOIN ppr_product_spec s ON s.id=m.spec_id WHERE a.id=?`, [analysisId]);
       if (!analysis) return NextResponse.json({ error: '分析任务不存在' }, { status: 404 });
       const confirmed = await dbClient.queryAll<Row>("SELECT * FROM ppr_analysis_conclusion WHERE analysis_id=? AND engineer_decision='confirmed' ORDER BY sort_no", [analysisId]);
       const d4 = confirmed.map((item) => `【${item.category}】${item.hypothesis}\n验证发现：${item.actual_finding || item.engineer_comment || '待补充'}`).join('\n\n');
@@ -67,9 +68,9 @@ export async function PUT(request: NextRequest) {
     await dbClient.query(`UPDATE ppr_eight_d_report SET ${fields.map((field) => `${field}=?`).join(', ')} WHERE id=?`, [...values, id]);
     if (body.finalize) {
       const report = await dbClient.queryOne<Row>(`SELECT r.*, a.summary, e.event_no, e.metric_code, e.risk_level,
-        b.batch_no FROM ppr_eight_d_report r JOIN ppr_analysis_run a ON a.id=r.analysis_id
+        m.batch_no FROM ppr_eight_d_report r JOIN ppr_analysis_run a ON a.id=r.analysis_id
         JOIN ppr_alert_event e ON e.id=a.alert_id JOIN ppr_product_measurement m ON m.id=e.measurement_id
-        JOIN ppr_batch b ON b.id=m.batch_id WHERE r.id=?`, [id]);
+        WHERE r.id=?`, [id]);
       if (!report) return NextResponse.json({ error: '报告不存在' }, { status: 404 });
       const missing = ['d1','d2','d3','d4','d5','d6','d7','d8'].filter((field) => !String(body[field] || '').trim());
       if (missing.length) return NextResponse.json({ error: `定稿前请补齐：${missing.map((item) => item.toUpperCase()).join('、')}` }, { status: 400 });

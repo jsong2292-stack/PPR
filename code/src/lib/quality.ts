@@ -16,6 +16,11 @@ export interface ResourceConfig {
   orderBy: string;
   listSql: string;
   /**
+   * 只读资源：批次已经不是表，而是按批次号实时聚合的视图（见 scripts/init-db.sql），
+   * 没有可写字段，也不允许手工新建 / 编辑 / 删除（删除请走批次清理接口）。
+   */
+  readOnly?: boolean;
+  /**
    * 下钻页面的收窄维度：查询参数名，顺序对应 scopedListSql 里的 `?` 占位符。
    * 只有这些参数全部传齐时才会走 scopedListSql，避免下钻页面误拿到全量数据。
    */
@@ -60,22 +65,20 @@ export const RESOURCE_CONFIG: Record<MasterResource, ResourceConfig> = {
       JOIN ppr_equipment_type t ON t.id=e.type_id ORDER BY e.id DESC`,
   },
   batches: {
+    // 批次号是产品检验数据与设备采集数据之间唯一的关联键：批次不落表，这里查的是按 batch_no 聚合的视图。
+    // 所以没有可写字段（readOnly），批次清单完全由「产品数据 + 设备数据」实时算出来。
     table: 'ppr_batch',
-    columns: ['batch_no', 'spec_id', 'extruder_id', 'haul_off_id', 'production_group', 'start_time', 'end_time', 'status', 'data_source'],
-    required: ['batch_no', 'spec_id', 'production_group', 'start_time'],
-    orderBy: 'b.id DESC',
-    listSql: `SELECT b.*, s.name AS spec_name, ex.name AS extruder_name, ha.name AS haul_off_name
-      FROM ppr_batch b JOIN ppr_product_spec s ON s.id=b.spec_id
-      LEFT JOIN ppr_equipment ex ON ex.id=b.extruder_id
-      LEFT JOIN ppr_equipment ha ON ha.id=b.haul_off_id ORDER BY b.id DESC`,
-    // 产品台账下钻：某个规格下的批次，额外带出检验条数与最近检验时间。
+    columns: [],
+    required: [],
+    readOnly: true,
+    orderBy: 'b.start_time DESC',
+    listSql: `SELECT b.*, s.code AS spec_code, s.name AS spec_name
+      FROM ppr_batch b LEFT JOIN ppr_product_spec s ON s.id=b.spec_id
+      ORDER BY b.start_time DESC`,
+    // 产品台账下钻：某个规格下的批次（规格取该批次检验记录上的 spec_id）。
     scopeParams: ['spec_id'],
-    scopedListSql: `SELECT b.*, s.name AS spec_name, ex.name AS extruder_name, ha.name AS haul_off_name,
-        (SELECT COUNT(*) FROM ppr_product_measurement m WHERE m.batch_id=b.id) AS measurement_count,
-        (SELECT MAX(m.inspect_time) FROM ppr_product_measurement m WHERE m.batch_id=b.id) AS last_inspect_time
-      FROM ppr_batch b JOIN ppr_product_spec s ON s.id=b.spec_id
-      LEFT JOIN ppr_equipment ex ON ex.id=b.extruder_id
-      LEFT JOIN ppr_equipment ha ON ha.id=b.haul_off_id
+    scopedListSql: `SELECT b.*, s.code AS spec_code, s.name AS spec_name
+      FROM ppr_batch b LEFT JOIN ppr_product_spec s ON s.id=b.spec_id
       WHERE b.spec_id=? ORDER BY b.start_time DESC`,
   },
   metrics: {
@@ -87,21 +90,22 @@ export const RESOURCE_CONFIG: Record<MasterResource, ResourceConfig> = {
   },
   measurements: {
     table: 'ppr_product_measurement',
-    columns: ['record_no', 'sample_no', 'batch_id', 'inspect_time', 'outer_diameter_mm', 'min_wall_thickness_mm', 'max_wall_thickness_mm', 'max_outer_diameter_mm', 'min_outer_diameter_mm', 'ovality_mm', 'data_source', 'quality_flag', 'remark'],
-    // batch_id 不在这里：Excel 导入可以用 batch_no 代替，由 resolveMeasurementBatch 统一解析。
+    // batch_no / spec_id 直接落在检验记录上：批次号负责与设备采集数据关联，spec_id 决定判定限值。
+    columns: ['record_no', 'sample_no', 'batch_no', 'spec_id', 'production_group', 'batch_start_time', 'inspect_time', 'outer_diameter_mm', 'min_wall_thickness_mm', 'max_wall_thickness_mm', 'max_outer_diameter_mm', 'min_outer_diameter_mm', 'ovality_mm', 'data_source', 'quality_flag', 'remark'],
+    // batch_no / spec_id 不在这里：由 resolveMeasurementBatch 从页面上下文或文件里的 spec_code 解析后补进来。
     required: ['record_no', 'sample_no', 'inspect_time'],
     orderBy: 'm.inspect_time DESC',
-    // 列表额外带出产品名称（规格名）与产品类别（规格所属类别），二者都来自批次关联的规格，不是本表字段。
-    listSql: `SELECT m.*, b.batch_no, s.name AS spec_name, c.name AS category_name FROM ppr_product_measurement m
-      JOIN ppr_batch b ON b.id=m.batch_id JOIN ppr_product_spec s ON s.id=b.spec_id
+    // 产品名称（规格名）与产品类别都来自检验记录自己的 spec_id，不再经过批次表。
+    listSql: `SELECT m.*, s.code AS spec_code, s.name AS spec_name, c.name AS category_name FROM ppr_product_measurement m
+      JOIN ppr_product_spec s ON s.id=m.spec_id
       JOIN ppr_product_category c ON c.id=s.category_id
       ORDER BY m.inspect_time DESC`,
-    // 产品台账下钻：某个批次下的全部检验记录。
-    scopeParams: ['batch_id'],
-    scopedListSql: `SELECT m.*, b.batch_no, s.name AS spec_name, c.name AS category_name FROM ppr_product_measurement m
-      JOIN ppr_batch b ON b.id=m.batch_id JOIN ppr_product_spec s ON s.id=b.spec_id
+    // 产品台账下钻：某个批次号下的全部检验记录。
+    scopeParams: ['batch_no'],
+    scopedListSql: `SELECT m.*, s.code AS spec_code, s.name AS spec_name, c.name AS category_name FROM ppr_product_measurement m
+      JOIN ppr_product_spec s ON s.id=m.spec_id
       JOIN ppr_product_category c ON c.id=s.category_id
-      WHERE m.batch_id=? ORDER BY m.inspect_time DESC`,
+      WHERE m.batch_no=? ORDER BY m.inspect_time DESC`,
   },
 };
 

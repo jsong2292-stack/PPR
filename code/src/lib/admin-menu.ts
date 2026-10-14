@@ -33,10 +33,10 @@ export const ADMIN_MENU_GROUPS: AdminMenuGroup[] = [
   {
     key: 'datasource',
     label: '数据源管理',
-    description: '维护批次基础信息、产品台账与设备台账；点进去可逐级下钻到批次和明细数据。',
+    description: '维护产品台账与设备台账；批次总览由产品数据与设备数据按批次号实时关联，点进去可逐级下钻到批次和明细数据。',
     icon: Database,
     items: [
-      { label: '批次基础信息', href: '/quality/data/batches', icon: ListChecks },
+      { label: '批次总览', href: '/quality/data/batches', icon: ListChecks },
       { label: '产品台账', href: '/quality/data/products', icon: ClipboardCheck },
       { label: '设备台账', href: '/quality/data/equipment', icon: Factory },
     ],

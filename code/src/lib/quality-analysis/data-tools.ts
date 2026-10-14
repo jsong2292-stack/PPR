@@ -7,23 +7,24 @@ type Row = Record<string, unknown>;
 
 export interface AlertAgentContext extends Row {
   id: number;
-  batch_id: number;
+  /** 批次号字符串，是追溯批次上下文的唯一关联键。 */
+  batch_no: string;
   spec_id: number;
   metric_code: string;
   inspect_time: string;
 }
 
 export async function loadAlertAgentContext(alertId: number): Promise<AlertAgentContext | null> {
+  // 批次不落表：批次号、生产班组取自检验记录，规格按记录自己的 spec_id 关联。
   return dbClient.queryOne<AlertAgentContext>(`SELECT a.*, m.record_no, m.sample_no, m.inspect_time,
     m.outer_diameter_mm, m.min_wall_thickness_mm, m.max_wall_thickness_mm,
     m.max_outer_diameter_mm, m.min_outer_diameter_mm, m.ovality_mm, m.data_source,
-    b.id AS batch_id, b.batch_no, b.production_group, b.spec_id,
+    m.batch_no, m.production_group, m.spec_id,
     s.name AS spec_name, s.outer_lower_mm, s.outer_upper_mm,
     s.wall_lower_mm, s.wall_upper_mm, s.ovality_upper_mm
     FROM ppr_alert_event a
     JOIN ppr_product_measurement m ON m.id=a.measurement_id
-    JOIN ppr_batch b ON b.id=m.batch_id
-    JOIN ppr_product_spec s ON s.id=b.spec_id
+    JOIN ppr_product_spec s ON s.id=m.spec_id
     WHERE a.id=?`, [alertId]);
 }
 
@@ -97,8 +98,8 @@ export function createQualityAgentTools(
         max_outer_diameter_mm, min_outer_diameter_mm, ovality_mm,
         data_source, quality_flag, remark
         FROM ppr_product_measurement
-        WHERE batch_id=? AND inspect_time<=?
-        ORDER BY inspect_time DESC LIMIT ?`, [context.batch_id, context.inspect_time, safeLimit]);
+        WHERE batch_no=? AND inspect_time<=?
+        ORDER BY inspect_time DESC LIMIT ?`, [context.batch_no, context.inspect_time, safeLimit]);
     }),
     {
       name: 'get_batch_measurements',
@@ -116,8 +117,8 @@ export function createQualityAgentTools(
         FROM ppr_equipment_reading r
         JOIN ppr_equipment e ON e.id=r.equipment_id
         JOIN ppr_equipment_type t ON t.id=e.type_id
-        WHERE r.batch_id=? AND ABS(TIMESTAMPDIFF(MINUTE,r.collect_time,?))<=?
-        ORDER BY r.collect_time`, [context.batch_id, context.inspect_time, safeWindow]);
+        WHERE r.batch_no=? AND ABS(TIMESTAMPDIFF(MINUTE,r.collect_time,?))<=?
+        ORDER BY r.collect_time`, [context.batch_no, context.inspect_time, safeWindow]);
     }),
     {
       name: 'get_equipment_window',
@@ -129,14 +130,14 @@ export function createQualityAgentTools(
   const getReferenceMeasurements = tool(
     async ({ limit }: { limit: number }) => trace(traces, 'get_reference_measurements', { limit }, reporter, async () => {
       const safeLimit = Math.max(3, Math.min(50, limit));
+      // 参考记录按检验记录自己的规格取，排除当前批次用 batch_no 字符串比较。
       return dbClient.queryAll<Row>(`SELECT m.id, m.record_no, m.inspect_time,
         m.outer_diameter_mm, m.min_wall_thickness_mm, m.max_wall_thickness_mm,
         m.max_outer_diameter_mm, m.min_outer_diameter_mm, m.ovality_mm,
-        m.quality_flag, b.batch_no, b.production_group
+        m.quality_flag, m.batch_no, m.production_group
         FROM ppr_product_measurement m
-        JOIN ppr_batch b ON b.id=m.batch_id
-        WHERE b.spec_id=? AND b.id<>? AND m.quality_flag='normal'
-        ORDER BY m.inspect_time DESC LIMIT ?`, [context.spec_id, context.batch_id, safeLimit]);
+        WHERE m.spec_id=? AND m.batch_no<>? AND m.quality_flag='normal'
+        ORDER BY m.inspect_time DESC LIMIT ?`, [context.spec_id, context.batch_no, safeLimit]);
     }),
     {
       name: 'get_reference_measurements',

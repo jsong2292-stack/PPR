@@ -1,0 +1,60 @@
+{
+  "generatedAt": "2026-10-14T07:11:21.419Z",
+  "spec": "SPEC-25X4.2",
+  "proximityRatio": 0.15,
+  "proximityRunLength": 3,
+  "batches": [
+    {
+      "batch_no": "12121D0050",
+      "label": "全正常基线",
+      "scenario": "场景 0 · 全正常基线",
+      "records": 6,
+      "readingPoints": 12,
+      "high": 0,
+      "medium": 0,
+      "normal": 18,
+      "flaggedHigh": 0,
+      "flaggedMedium": 0,
+      "note": "三段连续接近都没有，全部 R0。"
+    },
+    {
+      "batch_no": "12121D0051",
+      "label": "壁厚连续3点接近下限",
+      "scenario": "场景 1 · 连续 3 点接近下限（R5 中风险）",
+      "records": 6,
+      "readingPoints": 12,
+      "high": 0,
+      "medium": 1,
+      "normal": 17,
+      "flaggedHigh": 0,
+      "flaggedMedium": 3,
+      "note": "队列异常页签 1 条中风险（挂第4点壁厚）；产品数据列表第2/3/4行显示中风险。"
+    },
+    {
+      "batch_no": "12121D0052",
+      "label": "外径连续4点接近上限+不圆度2点接近",
+      "scenario": "场景 2 · 连续 4 点接近上限 / 2 点接近不告警（R5 边界）",
+      "records": 6,
+      "readingPoints": 12,
+      "high": 0,
+      "medium": 1,
+      "normal": 17,
+      "flaggedHigh": 0,
+      "flaggedMedium": 4,
+      "note": "不圆度2点接近不升级（边界反例）；外径4点连续段只算1条中风险。"
+    },
+    {
+      "batch_no": "12121D0053",
+      "label": "三指标越限含一条记录双越限",
+      "scenario": "场景 3 · 超出标准区间（R3 高风险，含上/下越限与双指标同越）",
+      "records": 6,
+      "readingPoints": 12,
+      "high": 4,
+      "medium": 0,
+      "normal": 14,
+      "flaggedHigh": 3,
+      "flaggedMedium": 0,
+      "note": "高风险事件 4 条（外径1/壁厚2/不圆度1），分属 3 条记录；第4点一条记录贡献 2 条高风险事件（外径 + 壁厚）。"
+    }
+  ]
+}

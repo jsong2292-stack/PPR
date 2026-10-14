@@ -24,7 +24,7 @@ export interface ImportTemplateExtra {
   label: string;
   note?: string;
   required?: boolean;
-  /** 该列替代的表单字段（例如 batch_no 替代 batch_id），被替代字段不进模板。 */
+  /** 该列替代的表单字段（下钻页面固定下来的维度列），被替代字段不进模板。 */
   replaces?: string;
 }
 

@@ -57,20 +57,27 @@ flowchart LR
     J --> K[ppr_analysis_run]
     J --> L[ppr_analysis_conclusion]
     L --> M[工程师确认/驳回/补充]
-    M --> N[8D 报告]
+    M --> P{8D 生成模式}
+    P -->|rule| Q[8D 规则模板]
+    P -->|agent| R[8D 生成 Agent]
+    R --> S[诊断白名单工具 + 诊断结论工具]
+    Q --> N[ppr_eight_d_report D1-D8]
+    R --> N
     N --> O[历史归档]
 ```
 
-系统分为三个层次：
+系统分为四个层次：
 
 1. **预警判定层**：用确定性规则判断数据是否超出规格区间或接近边界；
 2. **异常诊断层**：规则引擎或 Agent 根据预警事件形成分析线索；
-3. **人工闭环层**：工程师验证分析结论，之后进入 8D 和历史归档。
+3. **人工闭环层**：工程师验证分析结论，填写实际发现与意见并确认或驳回；
+4. **报告生成层**：8D 生成 Agent 把诊断摘要、页面引用数据、结论卡片和工程师验证记录整理为 D1–D8 草稿。
 
 预警判定和异常诊断是两个不同概念：
 
 - 预警判定回答“哪条数据需要关注”；
-- 异常诊断回答“应从哪些方向排查、当前有哪些证据、还缺什么证据”。
+- 异常诊断回答“应从哪些方向排查、当前有哪些证据、还缺什么证据”；
+- 8D 生成回答“已确认的问题、根因边界与措施计划如何落成可审查的报告”，它不产生新的根因结论。
 
 ### 2.1 Agent 上游的预警规则
 
@@ -1137,12 +1144,21 @@ Agent 不负责：
 | `src/lib/quality-analysis/langchain-agent.ts` | LangChain Agent、Prompt、模型调用和结果审计 |
 | `src/lib/quality-analysis/rule-engine.ts` | 确定性规则诊断 |
 | `src/lib/quality-analysis/service.ts` | 双模式选择和自动降级 |
-| `src/lib/quality-analysis/types.ts` | Zod 结构化输出和公共类型 |
+| `src/lib/quality-analysis/types.ts` | Zod 结构化输出和公共类型（含 8D 报告 Schema） |
+| `src/lib/quality-analysis/eight-d-agent.ts` | 8D 生成 Agent、Prompt、诊断结论工具和结果审计 |
+| `src/lib/quality-analysis/eight-d-service.ts` | 8D 生成的双模式选择和规则模板降级 |
+| `src/lib/quality-analysis/stream-client.ts` | 前端统一消费 SSE 生成流（诊断分析与 8D 生成共用） |
 | `src/lib/quality-analysis/alert-engine.ts` | 产品数据预警判定，不属于大模型诊断 |
+| `src/lib/quality-report.ts` | 8D 报告读取口径与生成结果入库 |
 | `src/app/api/quality/analysis/route.ts` | 分析查询、生成、持久化和工程师验证 API |
+| `src/app/api/quality/reports/route.ts` | 报告查询、空白草稿创建、编辑与定稿归档 API |
+| `src/app/api/quality/reports/generate/route.ts` | 8D 报告生成 API（SSE 实时过程） |
 | `src/app/api/quality/agent/status/route.ts` | Agent 配置状态 API |
-| `src/components/quality/DiagnosisClient.tsx` | 诊断模式选择、结果展示和工程师验证 UI |
+| `src/components/quality/DiagnosisClient.tsx` | 诊断模式选择、结果展示、工程师验证和 8D 生成入口 |
+| `src/components/quality/EightDGeneratePanel.tsx` | 8D 生成按钮、实时过程与草稿预览（诊断页/工作台共用） |
+| `src/components/quality/ReportClient.tsx` | 8D 报告编辑、校验、定稿与导出 |
 | `scripts/migrations/001_quality_agent.sql` | Agent 审计字段及系统配置迁移 |
+| `scripts/migrations/011_eight_d_generation.sql` | 8D 报告生成审计字段迁移 |
 
 ---
 
@@ -1280,3 +1296,161 @@ src/components/quality/AnalysisProcessPanel.tsx
 安全边界：
 
 > 页面展示的是模式选择、工具调用、证据数量、结构化校验和入库状态等可审计过程，不展示或要求模型输出内部隐式思维链（Chain of Thought）。最终分析依据仍以工具证据、结构化结论和工程师验证为准。
+
+---
+
+## 21. 8D 报告生成 Agent
+
+### 21.1 触发方式与入口
+
+8D 报告不再由接口内的固定模板文字生成，而是由独立的 8D 生成 Agent 产出 D1–D8 结构化草稿。
+
+生成动作与生成过程都发生在 **8D 报告工作台**：诊断页只负责保存工程师填写并把用户带过去。
+
+| 入口 | 位置 | 行为 |
+|---|---|---|
+| 诊断页 | 结论卡片下方的「生成 8D 报告」 | 先把本页未保存的「实际发现 / 工程师意见」落库（结论卡片上的确认/驳回已即时保存），成功后跳转 `/quality/report?analysisId=<id>&generate=1` |
+| 8D 工作台 | 页面顶部的「生成 8D 报告」区 | 检测到 `generate=1` 时自动发起一次生成，并实时展示过程与 D1–D8；也可在此手动「重新生成」 |
+
+报告页在自动生成前会先 `router.replace` 掉 URL 上的 `generate=1`，因此刷新、前进或后退不会再次触发一次真实的模型调用。
+
+```http
+POST /api/quality/reports/generate
+Accept: text/event-stream
+body: { "analysisId": 21, "regenerate": true }
+```
+
+非 SSE 调用返回同样的结果 JSON；`regenerate=false` 且已有草稿时直接复用，不重复调用模型。
+
+### 21.2 输入上下文
+
+Agent 的输入严格来自四类数据，与页面上能看到的内容一致：
+
+1. **诊断分析摘要**：`ppr_analysis_run.summary`，属于上一步诊断 Agent 的分析意见，不等于工程师结论；
+2. **页面引用的数据**：预警事件、观测值与规格标准区间、同批次检验序列、异常时段设备采集数据、同规格正常参考记录；
+3. **结论卡片**：`ppr_analysis_conclusion` 的假设、支持证据、缺失证据、建议验证动作、证据完备度；
+4. **工程师人工填写**：`actual_finding`（实际发现）、`engineer_comment`（工程师意见）与 `engineer_decision`（确认/驳回/待验证）。
+
+### 21.3 白名单工具
+
+8D Agent 复用诊断 Agent 的只读工具，并额外增加一个结论工具：
+
+| 工具 | 用途 |
+|---|---|
+| `get_alert_context` | 事件、触发记录、批次、规格与限值 |
+| `get_batch_measurements` | 同批次异常时刻前的检验序列 |
+| `get_equipment_window` | 异常检验时刻前后的温度、压力、牵引速度 |
+| `get_reference_measurements` | 同规格正常参考记录 |
+| `get_metric_definition` | 指标口径、单位与当前规格限值 |
+| `get_diagnosis_result` | 诊断摘要、逐条结论卡片、工程师实际发现/意见与判定统计 |
+
+工具同样不接受表名、SQL、任意字段名、任意批次号、任意规格 ID 或任意指标编码。
+
+### 21.4 根因纪律
+
+D4 是报告中最容易被夸大的部分，因此有硬约束：
+
+```text
+engineer_decision = confirmed  ->  只能写为「已确认根因」，且必须带上实际发现与工程师意见
+engineer_decision = rejected   ->  写入「已排除项」，保留否决理由
+engineer_decision = pending    ->  只能写为「仍待验证假设」，标注未经确认不能作为根因
+没有任何已确认结论             ->  D4 必须写明「根因尚未确认」
+```
+
+诊断摘要只能表述为“诊断分析认为”，不得表述为“已确认”。D5–D8 只能写候选措施与计划，必须标注待批准或尚无验证结果。人名未知时写角色与“姓名待确认”，不得编造。
+
+### 21.5 结构化输出
+
+输出 Schema 见 `EightDReportSchema`，字段与 `ppr_eight_d_report` 一一对应：
+
+```text
+title  D1 组建团队  D2 问题描述（5W2H）  D3 临时围堵措施
+D4 根因分析与验证（6M：已确认 / 已排除 / 待验证）
+D5 永久纠正措施选择  D6 实施与验证  D7 预防再发生  D8 团队表彰与结案
+```
+
+### 21.6 流式过程
+
+生成过程复用第 20 节的 SSE 协议与 `AnalysisProcessPanel`，阶段含义一致：
+
+```text
+preparing   读取诊断分析、结论卡片与工程师验证记录
+model       模型初始化、按 D1–D8 组织报告结构
+tool        白名单工具开始和完成
+rule        规则模板拼装（未启用 Agent 或降级时）
+fallback    Agent 降级
+validation  结构化校验
+persistence 报告草稿与生成审计信息入库
+complete    全流程完成
+```
+
+前端在 8D 工作台有一块过程区域，标题为「8D 生成过程 · 工具与证据轨迹」；正文区在生成期间就是 D1–D8 的输入框本身，字段内容随模型产出实时写入，生成完成后同一页直接切换为可编辑状态，不需要在两个页面之间来回看。
+
+### 21.6.1 D1–D8 按字段流式写入
+
+8D 的结构化输出由 `toolStrategy` 通过**一次工具调用**产生，其参数就是
+`{"title":"…","d1":"…",…,"d8":"…"}` 这段 JSON 文本。网关会把工具参数按增量块推下来
+（实测同一份报告约 480 个增量块），因此可以在模型写报告的同时把字段内容填进页面。
+
+同一条 SSE 通道上多一种帧：
+
+```text
+event: progress   现有的取证/校验轨迹（不变）
+event: draft      { field: "d4", text: "…", open: true }
+event: result     流结束后校验通过并落库的权威报告
+```
+
+`text` 是该字段**目前为止的完整文本**而不是增量，客户端直接覆盖即可，因此丢帧或重复都不会把
+输入框拼错；`open` 表示模型此刻是否还在写这个字段，页面据此高亮「生成中」。
+
+实现要点：
+
+| 关注点 | 做法 |
+|---|---|
+| 字段切分 | `src/lib/quality-analysis/eight-d-stream.ts` 在累积的 JSON 文本里扫描第一层的 `title/d1..d8` 字符串值 |
+| 归并单位 | 按 tool call 的 `id` 累积，**不能按 index**：工具调用 index 每轮回复都从 0 重来，会把数据工具参数和结构化输出拼成非法 JSON |
+| 增量边界 | 块的边界可能落在转义序列中间（`\` 或 `\u12`），未完成的转义一律丢弃等下一块 |
+| 推送节流 | 50 ms 合并一次，字段开始/结束的边界帧立即推送 |
+| 权威结果 | 落库与校验只用流结束后的 `JSON.parse` + zod 结果；增量解析只服务展示，两者不一致时以权威结果为准并打印告警 |
+| 出字顺序 | 就是模型输出 JSON 的字段顺序（schema 声明顺序），**是串行的**；8 个字段同时并行输出需要拆成 8 次调用，会牺牲字段间一致性，故未采用 |
+
+实测出字节奏（同一网关、D1–D8 约 6.7k 字）：取证阶段约 4 s 后开始出字，
+`d1@4.1s → d2@6.4s → d3@11.1s → d4@14.5s → d5@24.8s → d6@29.1s → d7@32.2s → d8@34.7s`，
+整体 33 s 左右，平均约 200 字/秒。
+
+### 21.7 持久化与审计
+
+`ppr_eight_d_report` 通过 `uk_ppr_report_analysis` 保证一个分析任务只有一份报告：首次生成 INSERT，重新生成时原地 UPDATE 并保持 `report_no` 与 `id` 不变（历史归档按 `report_id` 引用）。
+
+生成审计字段与 `ppr_analysis_run` 口径一致：
+
+```text
+generation_engine  agent / rule
+model_name         实际使用的模型
+prompt_version     8D 提示词版本
+agent_version      编排实现版本
+tool_trace_json    工具调用轨迹与返回证据
+latency_ms         生成耗时
+fallback_reason    降级原因
+generated_by       生成发起人
+generated_at       生成时间
+```
+
+### 21.8 定稿纪律
+
+定稿时服务端强制校验：
+
+1. D1–D8 全部非空；
+2. 至少存在一条 `engineer_decision='confirmed'` 的结论。
+
+不满足则拒绝定稿并返回具体缺项，避免把未经确认的假设当作根因写入历史归档。
+
+### 21.9 降级规则
+
+与诊断分析共用 `quality_analysis_mode` 与 `quality_agent_*` 配置，不引入第二套模型设置：
+
+1. `quality_analysis_mode=rule`：直接使用 8D 规则模板；
+2. Agent 模式但未配置密钥：按 `quality_agent_fallback_to_rule` 决定降级或直接报错；
+3. Agent 调用失败：按同一开关决定降级或抛出错误。
+
+8D 规则模板只根据真实数据拼装 D1–D4（D4 按确认/否决/待验证分组），D5–D8 保留为明确的待填写项，模板不会代写未发生的措施与结果。降级原因写入 `fallback_reason` 并在页面以黄色提示展示。

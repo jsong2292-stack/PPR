@@ -1,19 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { dbClient, makeBusinessNo } from '@/lib/quality';
 import { getCurrentUser } from '@/lib/auth';
+import { createEmptyDraft, queryReport } from '@/lib/quality-report';
 
 export const runtime = 'nodejs';
 type Row = Record<string, unknown>;
-
-async function queryReport(analysisId?: number) {
-  const where = analysisId ? 'WHERE r.analysis_id=?' : '';
-  // 批次不落表：批次号取自检验记录，规格按记录自己的 spec_id 关联。
-  return dbClient.queryOne<Row>(`SELECT r.*, a.run_no, a.summary, a.alert_id, e.event_no, e.metric_code, e.risk_level,
-    m.batch_no, s.name AS spec_name FROM ppr_eight_d_report r
-    JOIN ppr_analysis_run a ON a.id=r.analysis_id JOIN ppr_alert_event e ON e.id=a.alert_id
-    JOIN ppr_product_measurement m ON m.id=e.measurement_id
-    JOIN ppr_product_spec s ON s.id=m.spec_id ${where} ORDER BY r.id DESC LIMIT 1`, analysisId ? [analysisId] : []);
-}
 
 export async function GET(request: NextRequest) {
   if (!(await getCurrentUser())) return NextResponse.json({ error: '请先登录' }, { status: 401 });
@@ -25,30 +16,30 @@ export async function GET(request: NextRequest) {
   }
 }
 
+/**
+ * 只创建一份空白草稿（标题 + 负责人），不再写入任何固定模板文字。
+ * D1–D8 必须由 POST /api/quality/reports/generate 的 8D 生成 Agent 产出，
+ * 或由工程师在工作台逐项填写；接口不再代替工程师编造措施与结案内容。
+ */
 export async function POST(request: NextRequest) {
-  if (!(await getCurrentUser())) return NextResponse.json({ error: '请先登录' }, { status: 401 });
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   const body = await request.json().catch(() => ({}));
   const analysisId = Number(body.analysisId);
   if (!analysisId) return NextResponse.json({ error: '缺少分析任务ID' }, { status: 400 });
   try {
     const existing = await queryReport(analysisId);
     if (!existing) {
-      const analysis = await dbClient.queryOne<Row>(`SELECT a.*, e.event_no, e.rule_name, e.metric_code, e.risk_level,
-        e.threshold_text, m.batch_no, m.production_group, s.name AS spec_name FROM ppr_analysis_run a
-        JOIN ppr_alert_event e ON e.id=a.alert_id JOIN ppr_product_measurement m ON m.id=e.measurement_id
+      const analysis = await dbClient.queryOne<Row>(`SELECT a.id, e.event_no, e.metric_code, m.batch_no, s.name AS spec_name
+        FROM ppr_analysis_run a JOIN ppr_alert_event e ON e.id=a.alert_id
+        JOIN ppr_product_measurement m ON m.id=e.measurement_id
         JOIN ppr_product_spec s ON s.id=m.spec_id WHERE a.id=?`, [analysisId]);
       if (!analysis) return NextResponse.json({ error: '分析任务不存在' }, { status: 404 });
-      const confirmed = await dbClient.queryAll<Row>("SELECT * FROM ppr_analysis_conclusion WHERE analysis_id=? AND engineer_decision='confirmed' ORDER BY sort_no", [analysisId]);
-      const d4 = confirmed.map((item) => `【${item.category}】${item.hypothesis}\n验证发现：${item.actual_finding || item.engineer_comment || '待补充'}`).join('\n\n');
-      await dbClient.query(`INSERT INTO ppr_eight_d_report
-        (report_no, analysis_id, title, d1, d2, d3, d4, owner_name)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [
-          makeBusinessNo('8D'), analysisId, `${analysis.event_no} 过程质量异常8D报告`,
-          '质量工程师（主责）、生产领班、设备工程师、检验员。具体成员与职责待确认。',
-          `${analysis.spec_name} / 批次 ${analysis.batch_no} 触发“${analysis.rule_name}”。${analysis.threshold_text || ''}`,
-          '隔离异常时段相关产品并加密复检；核对原始检验记录与设备运行记录；隔离范围由质量工程师最终核定。',
-          d4 || '尚无工程师确认的诊断结论，请返回诊断页完成验证。', body.ownerName || '质量工程师',
-        ]);
+      await createEmptyDraft({
+        analysisId,
+        title: `${analysis.event_no} ${analysis.batch_no} 过程质量异常8D报告`,
+        ownerName: typeof body.ownerName === 'string' && body.ownerName.trim() ? body.ownerName.trim() : '质量工程师',
+      });
     }
     return NextResponse.json({ data: await queryReport(analysisId) }, { status: existing ? 200 : 201 });
   } catch (cause) {
@@ -74,7 +65,11 @@ export async function PUT(request: NextRequest) {
       if (!report) return NextResponse.json({ error: '报告不存在' }, { status: 404 });
       const missing = ['d1','d2','d3','d4','d5','d6','d7','d8'].filter((field) => !String(body[field] || '').trim());
       if (missing.length) return NextResponse.json({ error: `定稿前请补齐：${missing.map((item) => item.toUpperCase()).join('、')}` }, { status: 400 });
+      // 定稿纪律：没有工程师已确认的结论时不允许把未验证假设当作根因结案。
       const confirmed = await dbClient.queryAll<Row>("SELECT hypothesis,actual_finding,engineer_comment FROM ppr_analysis_conclusion WHERE analysis_id=? AND engineer_decision='confirmed' ORDER BY sort_no", [report.analysis_id]);
+      if (!confirmed.length) {
+        return NextResponse.json({ error: '定稿前请先在诊断页确认至少一条结论，未经确认的假设不能作为根因结案' }, { status: 400 });
+      }
       await dbClient.query("UPDATE ppr_eight_d_report SET status='finalized', finalized_at=NOW() WHERE id=?", [id]);
       await dbClient.query(`INSERT INTO ppr_history_archive
         (archive_no, report_id, event_no, batch_no, metric_code, risk_level, problem_summary, confirmed_root_cause, corrective_action, archived_by)

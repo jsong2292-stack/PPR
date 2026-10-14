@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Bot, Check, ChevronRight, Database, FileSearch, Loader2, RefreshCw, Save, Settings2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +15,7 @@ import { AnalysisProcessPanel, type AnalysisProcessEvent } from './AnalysisProce
 import { EquipmentProcessTrendCard } from './EquipmentProcessTrendCard';
 import { MetricTrendCard, metricLabels } from './MetricTrendCard';
 import { PageHeader } from './PageHeader';
+import { streamQualityRequest } from '@/lib/quality-analysis/stream-client';
 
 type Row = Record<string, unknown>;
 type AnalysisMode = 'rule' | 'agent';
@@ -44,6 +45,15 @@ const toNumber = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+/** 已有报告的 8D 工具调用次数，用于在诊断页展示生成审计摘要。 */
+function asTraceCount(value: unknown) {
+  if (Array.isArray(value)) return value.length;
+  if (typeof value === 'string') {
+    try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed.length : 0; } catch { return 0; }
+  }
+  return 0;
+}
+
 /** 把预警事件的限值整理成「标准区间 / 实测值 / 偏差」，供诊断页的判定依据卡片展示。 */
 function ruleBreakdown(row: Row) {
   const config = limitColumns[String(row.metric_code ?? '')];
@@ -60,8 +70,7 @@ function ruleBreakdown(row: Row) {
   return { interval, observed, deviation };
 }
 
-const decisionLabels: Record<string, string> = { pending: '待验证', confirmed: '已确认', rejected: '已驳回' };
-const decisionStyles: Record<string, string> = {
+const decisionLabels: Record<string, string> = { pending: '待验证', confirmed: '已确认', rejected: '已驳回' };const decisionStyles: Record<string, string> = {
   pending: 'bg-amber-50 text-amber-700',
   confirmed: 'bg-emerald-50 text-emerald-700',
   rejected: 'bg-slate-100 text-slate-600',
@@ -69,6 +78,7 @@ const decisionStyles: Record<string, string> = {
 
 export function DiagnosisClient() {
   const search = useSearchParams();
+  const router = useRouter();
   const [alerts, setAlerts] = useState<Row[]>([]);
   const [measurements, setMeasurements] = useState<Row[]>([]);
   /** alertId 只来自监控页下钻链接，页面内不再改变它。 */
@@ -82,6 +92,13 @@ export function DiagnosisClient() {
   const [processEvents, setProcessEvents] = useState<AnalysisProcessEvent[]>([]);
   const [processExpanded, setProcessExpanded] = useState(false);
   const [processFinished, setProcessFinished] = useState(false);
+  /** 当前分析对应的 8D 报告草稿：由 8D 生成 Agent 写入，用于展示生成状态与草稿预览。 */
+  const [report, setReport] = useState<Row | null>(null);
+  const [reportReady, setReportReady] = useState(false);
+  /** 只在页面上被编辑过、尚未落库的结论 ID：生成 8D 前需要先提交这些改动。 */
+  const dirtyConclusions = useRef<Set<number>>(new Set());
+  /** 正在保存工程师填写并跳转到报告页。 */
+  const [navigating, setNavigating] = useState(false);
 
   const loadAlerts = useCallback(async () => {
     const response = await fetch('/api/quality/dashboard');
@@ -120,78 +137,87 @@ export function DiagnosisClient() {
   useEffect(() => { loadAlerts(); loadAgentStatus(); }, [loadAlerts, loadAgentStatus]);
   useEffect(() => { loadAnalysis(alertId); }, [alertId, loadAnalysis]);
 
+  const analysisId = analysis ? Number(analysis.id) : 0;
+
+  /** 报告是诊断页的附加信息：读取失败时保持「尚无草稿」，不阻断诊断主流程。 */
+  useEffect(() => {
+    let cancelled = false;
+    if (!analysisId) { setReport(null); setReportReady(true); return; }
+    setReportReady(false);
+    fetch(`/api/quality/reports?analysisId=${analysisId}`)
+      .then(async (response) => { const json = await response.json(); if (response.ok && !cancelled) setReport(json.data || null); })
+      .catch(() => { if (!cancelled) setReport(null); })
+      .finally(() => { if (!cancelled) setReportReady(true); });
+    return () => { cancelled = true; };
+  }, [analysisId]);
+
   const generate = async () => {
     if (!alertId) return toast.warning('请选择预警事件');
     setGenerating(true);
     setProcessEvents([]);
     setProcessFinished(false);
     setProcessExpanded(true);
-    let resultReceived = false;
     try {
-      const response = await fetch('/api/quality/analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-        body: JSON.stringify({
-          alertId: Number(alertId),
-          mode,
-          regenerate: Boolean(analysis),
-          generatedBy: '质量工程师',
-        }),
-      });
-      if (!response.ok || !response.body) {
-        const json = await response.json().catch(() => ({}));
-        throw new Error(json.error || '无法建立分析流');
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let streamError = '';
-
-      const handleBlock = (block: string) => {
-        if (!block.trim()) return;
-        let eventName = 'progress';
-        const dataLines: string[] = [];
-        for (const line of block.split('\n')) {
-          if (line.startsWith('event:')) eventName = line.slice(6).trim();
-          if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
-        }
-        if (!dataLines.length) return;
-        const payload = JSON.parse(dataLines.join('\n'));
-        if (eventName === 'progress') {
-          setProcessEvents((current) => [...current, payload as AnalysisProcessEvent]);
-        } else if (eventName === 'result') {
-          resultReceived = true;
-          setAnalysis(payload.data);
-          if (payload.data?.fallback_reason) toast.warning(`Agent已降级：${payload.data.fallback_reason}`);
-          else toast.success(mode === 'agent' ? 'LangChain Agent分析已完成' : '规则分析已完成');
-        } else if (eventName === 'error') {
-          streamError = payload.message || '生成分析失败';
-          setProcessEvents((current) => [...current, {
-            stage: 'complete', status: 'error', message: '分析过程执行失败', detail: streamError,
-            timestamp: new Date().toISOString(),
-          }]);
-        }
-      };
-
-      while (true) {
-        const { done, value } = await reader.read();
-        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-        const blocks = buffer.split('\n\n');
-        buffer = blocks.pop() || '';
-        blocks.forEach(handleBlock);
-        if (done) break;
-      }
-      if (buffer.trim()) handleBlock(buffer);
-      if (streamError) throw new Error(streamError);
-      if (!resultReceived) throw new Error('分析流结束但未返回结果');
-      setProcessFinished(true);
-      window.setTimeout(() => setProcessExpanded(false), 1400);
+      const result = await streamQualityRequest<{ data: Row }>(
+        '/api/quality/analysis',
+        { alertId: Number(alertId), mode, regenerate: Boolean(analysis), generatedBy: '质量工程师' },
+        (event) => setProcessEvents((current) => [...current, event]),
+      );
+      setAnalysis(result.data);
+      if (result.data?.fallback_reason) toast.warning(`Agent已降级：${result.data.fallback_reason}`);
+      else toast.success(mode === 'agent' ? 'LangChain Agent分析已完成' : '规则分析已完成');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '生成失败');
-      setProcessFinished(true);
     } finally {
       setGenerating(false);
+      setProcessFinished(true);
+      window.setTimeout(() => setProcessExpanded(false), 1400);
+    }
+  };
+
+  /**
+   * 生成 8D 前把页面上未保存的工程师填写（实际发现 / 工程师意见）落库，
+   * 保证 8D Agent 读到的是工程师当前看到的页面内容，而不是上一次保存的快照。
+   * 只提交真正改过的结论：结论卡片上的「确认/驳回/保存」已经即时落库，
+   * 全量回写会把未改动的结论也标成 engineer_modified=1。
+   */
+  const persistConclusions = async () => {
+    const dirty = dirtyConclusions.current;
+    if (!dirty.size) return;
+    for (const item of ((analysis?.conclusions as Row[]) || [])) {
+      if (!dirty.has(Number(item.id))) continue;
+      const response = await fetch('/api/quality/analysis', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conclusionId: item.id,
+          engineerDecision: item.engineer_decision || 'pending',
+          engineerComment: item.engineer_comment || '',
+          actualFinding: item.actual_finding || '',
+          updatedBy: '质量工程师',
+        }),
+      });
+      if (!response.ok) {
+        const json = await response.json().catch(() => ({}));
+        throw new Error((json as { error?: string }).error || '保存工程师验证记录失败，8D 报告未生成');
+      }
+    }
+    dirty.clear();
+  };
+
+  /**
+   * 生成 8D 的入口：先把工程师填写落库，再带 generate=1 跳到 8D 报告页，
+   * 让生成过程与 D1–D8 草稿都在报告页里展示（而不是在诊断页生成完再跳过去看）。
+   */
+  const goGenerate = async () => {
+    if (!analysisId || navigating) return;
+    setNavigating(true);
+    try {
+      await persistConclusions();
+      router.push(`/quality/report?analysisId=${analysisId}&generate=1`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '保存工程师验证记录失败，8D 报告未生成');
+      setNavigating(false);
     }
   };
 
@@ -213,10 +239,13 @@ export function DiagnosisClient() {
     loadAnalysis(alertId);
   };
 
-  const update = (id: unknown, key: string, value: string) => setAnalysis((state) => state ? {
-    ...state,
-    conclusions: (state.conclusions as Row[]).map((item) => item.id === id ? { ...item, [key]: value } : item),
-  } : state);
+  const update = (id: unknown, key: string, value: string) => {
+    dirtyConclusions.current.add(Number(id));
+    setAnalysis((state) => state ? {
+      ...state,
+      conclusions: (state.conclusions as Row[]).map((item) => item.id === id ? { ...item, [key]: value } : item),
+    } : state);
+  };
 
   /** 事件由监控页下钻带入（?alertId=），页面只展示该事件的证据与结论，不再提供切换。 */
   const selected = alerts.find((item) => String(item.id) === alertId);
@@ -311,7 +340,37 @@ export function DiagnosisClient() {
           <div className="grid grid-cols-3 gap-2"><Button size="sm" variant="outline" onClick={() => saveConclusion(item, 'rejected')}><X size={14} />驳回</Button><Button size="sm" variant="outline" onClick={() => saveConclusion(item)}><Save size={14} />保存</Button><Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => saveConclusion(item, 'confirmed')}><Check size={14} />确认</Button></div>
         </CardContent></Card>)}</div>
 
-        <Card className="border-blue-200 bg-blue-50 shadow-sm"><CardContent className="flex flex-wrap items-center justify-between gap-4 p-5"><div><b className="text-blue-950">下一步：生成 8D 报告</b><p className="mt-1 text-sm text-blue-800">报告会继承事件、分析摘要和工程师已确认结论，继续完成 D1–D8。</p></div><Button asChild className="bg-blue-700 hover:bg-blue-800"><Link href={`/quality/report?analysisId=${analysis.id}`}>进入 8D 工作台<ChevronRight size={16} /></Link></Button></CardContent></Card>
+        {reportReady && <Card className="border-blue-200 bg-blue-50/60 shadow-sm">
+          <CardHeader className="border-b border-blue-100 pb-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-base"><Bot size={17} />下一步：生成 8D 报告</CardTitle>
+                <p className="mt-1 text-xs text-slate-600">点击后会先保存本页填写的实际发现与工程师意见，然后进入 8D 报告页；8D Agent 在报告页读取诊断摘要、本页引用的限值与批次/设备数据、上方结论卡片和工程师记录，实时生成 D1–D8，生成过程与草稿内容都在报告页展示。</p>
+              </div>
+              {report
+                ? <Badge className={report.generation_engine === 'agent' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}>{report.generation_engine === 'agent' ? 'LangChain Agent 生成' : report.generation_engine === 'rule' ? '规则模板生成' : '已有草稿'}</Badge>
+                : <Badge variant="outline">尚无草稿</Badge>}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3 p-4">
+            {report ? <div className="grid gap-3 rounded-xl border border-blue-100 bg-white p-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+              <div><span className="text-slate-500">报告编号</span><b className="mt-0.5 block font-mono text-slate-900">{String(report.report_no || '—')}</b></div>
+              <div><span className="text-slate-500">生成模型</span><b className="mt-0.5 block text-slate-900">{String(report.model_name || '规则模板（不调用模型）')}</b></div>
+              <div><span className="text-slate-500">生成时间</span><b className="mt-0.5 block text-slate-900">{report.generated_at ? String(report.generated_at) : '—'}</b></div>
+              <div><span className="text-slate-500">证据轨迹</span><b className="mt-0.5 block text-slate-900">{asTraceCount(report.tool_trace_json) ? `${asTraceCount(report.tool_trace_json)} 次工具调用` : '规则模板无工具轨迹'}</b></div>
+            </div> : <p className="text-xs text-slate-600">尚未生成 8D 报告。建议先在结论卡片中填写实际发现与工程师意见，并完成确认或否决，Agent 会据此区分「已确认根因 / 已排除项 / 仍待验证假设」。</p>}
+            {Boolean(report?.fallback_reason) && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800"><b>降级说明：</b>{String(report?.fallback_reason)}</div>}
+            {report?.status === 'finalized' && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">报告已定稿并归档，不能重新生成。</div>}
+            <div className="flex flex-wrap items-center gap-3">
+              <Button onClick={goGenerate} disabled={navigating || report?.status === 'finalized'} className="bg-indigo-600 hover:bg-indigo-700">
+                {navigating ? <Loader2 className="animate-spin" size={16} /> : report ? <RefreshCw size={16} /> : <Bot size={16} />}
+                {report ? '重新生成 8D 报告' : '生成 8D 报告'}
+              </Button>
+              {report ? <Button asChild className="bg-blue-700 hover:bg-blue-800"><Link href={`/quality/report?analysisId=${analysisId}`}>进入 8D 工作台<ChevronRight size={16} /></Link></Button> : null}
+              <span className="text-xs text-slate-500">{navigating ? '正在保存工程师验证记录并跳转…' : '生成过程在 8D 报告页实时展示。'}</span>
+            </div>
+          </CardContent>
+        </Card>}
       </>}
 
     </>}

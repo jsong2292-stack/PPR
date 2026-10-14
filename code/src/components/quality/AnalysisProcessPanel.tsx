@@ -57,12 +57,17 @@ export function AnalysisProcessPanel({
   generating,
   finished,
   onToggle,
+  title = '分析过程 · 工具与证据轨迹',
+  runningLabel = '生成中',
 }: {
   events: AnalysisProcessEvent[];
   expanded: boolean;
   generating: boolean;
   finished: boolean;
   onToggle: () => void;
+  /** 面板标题：诊断分析与 8D 生成共用本组件，用标题区分两次运行。 */
+  title?: string;
+  runningLabel?: string;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -74,7 +79,7 @@ export function AnalysisProcessPanel({
   const hasWarning = events.some((event) => event.status === 'warning');
   const summaryStatus = generating ? 'running' : hasError ? 'error' : hasWarning ? 'warning' : 'success';
   const summaryStyle = statusStyles[summaryStatus];
-  const summaryLabel = generating ? '生成中' : hasError ? '执行失败' : hasWarning ? '已完成（含降级）' : finished ? '已完成' : '等待中';
+  const summaryLabel = generating ? runningLabel : hasError ? '执行失败' : hasWarning ? '已完成（含降级）' : finished ? '已完成' : '等待中';
 
   return <Card className="mb-5 overflow-hidden border-slate-200 bg-white shadow-sm">
     <button type="button" onClick={onToggle} className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-slate-50">
@@ -84,7 +89,7 @@ export function AnalysisProcessPanel({
         </span>
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <b className="text-sm text-slate-900">分析过程 · 工具与证据轨迹</b>
+            <b className="text-sm text-slate-900">{title}</b>
             <Badge variant="outline" className={summaryStyle.badge}>{summaryLabel}</Badge>
           </div>
           <p className="mt-0.5 truncate text-xs text-slate-500">

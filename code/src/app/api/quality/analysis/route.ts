@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dbClient, makeBusinessNo } from '@/lib/quality';
 import { getCurrentUser } from '@/lib/auth';
 import { generateQualityAnalysis } from '@/lib/quality-analysis/service';
-import { reportAnalysisProgress, type AnalysisProgressReporter } from '@/lib/quality-analysis/types';
+import { reportAnalysisProgress, type AnalysisProgressReporter, type ConclusionDraftReporter } from '@/lib/quality-analysis/types';
 import type { QualityAnalysisMode } from '@/lib/quality-analysis/config';
 
 export const runtime = 'nodejs';
@@ -45,7 +45,8 @@ async function getRun(runId?: number, alertId?: number) {
 async function generateAndPersist(
   body: GenerateBody,
   user: { nickname?: string | null; phone?: string | null },
-  reporter?: AnalysisProgressReporter
+  reporter?: AnalysisProgressReporter,
+  conclusionReporter?: ConclusionDraftReporter
 ) {
   const alertId = Number(body.alertId);
   if (!alertId) throw new Error('请选择预警事件');
@@ -63,7 +64,7 @@ async function generateAndPersist(
   const alert = await dbClient.queryOne<Row>('SELECT id FROM ppr_alert_event WHERE id=?', [alertId]);
   if (!alert) throw new Error('预警事件不存在');
 
-  const generation = await generateQualityAnalysis(alertId, requestedMode, reporter);
+  const generation = await generateQualityAnalysis(alertId, requestedMode, reporter, conclusionReporter);
   const generated = generation.result;
   await reportAnalysisProgress(reporter, {
     stage: 'persistence', status: 'running', message: '正在保存分析任务、证据快照与结论',
@@ -89,7 +90,7 @@ async function generateAndPersist(
 
   for (let index = 0; index < generated.output.conclusions.length; index += 1) {
     const item = generated.output.conclusions[index];
-    await dbClient.query(`INSERT INTO ppr_analysis_conclusion
+    const inserted = await dbClient.query(`INSERT INTO ppr_analysis_conclusion
       (analysis_id, sort_no, category, hypothesis, evidence, missing_evidence,
        validation_action, confidence, evidence_source_ids, generated_by_model)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
@@ -97,6 +98,15 @@ async function generateAndPersist(
       item.missingEvidence, item.validationAction, item.confidence,
       JSON.stringify(item.evidenceSourceIds), generated.modelName || null,
     ]);
+    // 落库即推一帧：内容与最终结果完全一致，并带上真实 id，
+    // 规则引擎模式（没有模型增量）也靠这一帧做到逐条渲染卡片。
+    conclusionReporter?.({
+      index,
+      conclusion: item,
+      open: false,
+      persisted: true,
+      id: Number(inserted.insertId),
+    });
   }
   await dbClient.query("UPDATE ppr_alert_event SET status='analyzing' WHERE id=?", [alertId]);
   const data = await getRun(analysisId);
@@ -133,7 +143,7 @@ export async function POST(request: NextRequest) {
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
-        const send = (event: 'progress' | 'result' | 'error', payload: unknown) => {
+        const send = (event: 'progress' | 'conclusion' | 'result' | 'error', payload: unknown) => {
           controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
         };
         try {
@@ -141,7 +151,9 @@ export async function POST(request: NextRequest) {
             stage: 'preparing', status: 'running', message: '已接收分析请求，正在准备上下文',
             timestamp: new Date().toISOString(),
           });
-          const result = await generateAndPersist(body, user, (event) => send('progress', event));
+          // 结论帧只用于展示：模型写一条推一条，落库后再推一帧带 id 的权威内容，
+          // 最终的权威结果仍在流结束时通过 result 帧下发。
+          const result = await generateAndPersist(body, user, (event) => send('progress', event), (event) => send('conclusion', event));
           send('result', result);
         } catch (cause) {
           console.error('streaming quality analysis generation failed', cause);

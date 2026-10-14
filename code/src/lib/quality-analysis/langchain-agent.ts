@@ -1,11 +1,24 @@
 import { createAgent, toolStrategy } from 'langchain';
 import { ChatOpenAI } from '@langchain/openai';
+import { createConclusionParser } from './conclusion-stream';
 import { createQualityAgentTools, loadAlertAgentContext } from './data-tools';
-import { QualityAnalysisSchema, reportAnalysisProgress, type AnalysisGenerationResult, type AnalysisProgressReporter, type ToolTraceItem } from './types';
+import {
+  QualityAnalysisSchema,
+  reportAnalysisProgress,
+  type AnalysisGenerationResult,
+  type AnalysisProgressReporter,
+  type ConclusionDraftEvent,
+  type ConclusionDraftReporter,
+  type QualityAnalysisOutput,
+  type ToolTraceItem,
+} from './types';
 import type { QualityAgentConfig } from './config';
 
 const PROMPT_VERSION = 'quality-agent-v2.0';
 const AGENT_VERSION = 'langchain-create-agent-v1';
+
+/** 结论帧的最小推送间隔：模型可能每秒吐出上百个增量块，合并后再推给页面。 */
+const DRAFT_FLUSH_INTERVAL_MS = 50;
 
 const SYSTEM_PROMPT = `你是PPR管材过程质量异常分析Agent，同时采用塑料管道工艺工程师和高分子材料工程师的视角。你的任务是调用提供的只读工具获取证据，把质量症状沿“测量—挤出—口模—牵伸—真空定径—冷却冻结—牵引—离线收缩”成型链以及“熔体黏度/弹性—口模膨胀—熔体强度—分子取向—结晶—收缩/降解”材料链转化为供质量工程师验证的结构化假设。你不负责最终质量判定、根因确认或调机决策。
 
@@ -78,7 +91,8 @@ function collectUsage(messages: unknown[]): Record<string, unknown> {
 export async function generateLangChainAgentAnalysis(
   alertId: number,
   config: QualityAgentConfig,
-  reporter?: AnalysisProgressReporter
+  reporter?: AnalysisProgressReporter,
+  conclusionReporter?: ConclusionDraftReporter
 ): Promise<AnalysisGenerationResult> {
   if (!config.apiKey) throw new Error('Agent模式未配置API密钥');
   const startedAt = Date.now();
@@ -118,21 +132,83 @@ export async function generateLangChainAgentAnalysis(
 
   await reportAnalysisProgress(reporter, {
     stage: 'model', status: 'running', message: '模型开始规划取证步骤并调用质量数据工具',
-    detail: '仅展示可审计工具与证据轨迹，不展示模型内部隐式思维链',
+    detail: '结论卡片会随生成逐条出现在页面下方；只展示可审计工具与证据轨迹，不展示模型内部隐式思维链',
   });
-  const result = await agent.invoke({
+
+  /**
+   * 流式消费而不是 invoke：`toolStrategy` 的结构化输出就是一次工具调用的参数，
+   * 网关会把参数按增量块推下来，逐块解析即可把结论卡片逐条送到页面。
+   *
+   * 与 8D 生成同一套做法：工具调用的 `index` 在每一轮模型回复里都从 0 重新开始，
+   * 所以按 tool call 的 `id` 分开累积（每个 tool call 的首块都会带 id），
+   * 数据工具的 JSON 不会命中 conclusions，两次调用也不会被拼到一起。
+   */
+  const toolCallKeyByIndex = new Map<number, string>();
+  const parsers = new Map<string, ReturnType<typeof createConclusionParser>>();
+  const pendingFrames = new Map<number, ConclusionDraftEvent>();
+  let lastFlushAt = 0;
+  const flushFrames = (force = false) => {
+    if (!pendingFrames.size || !conclusionReporter) { pendingFrames.clear(); return; }
+    const now = Date.now();
+    // 时间节流：同一条结论只推最新文本（帧里带的是完整字段，不是增量），
+    // 但结论开始/结束这类边界必须立刻推，否则页面会晚一步看到卡片切换。
+    if (!force && now - lastFlushAt < DRAFT_FLUSH_INTERVAL_MS) return;
+    lastFlushAt = now;
+    for (const event of [...pendingFrames.values()].sort((left, right) => left.index - right.index)) conclusionReporter(event);
+    pendingFrames.clear();
+  };
+
+  const messageStream = await agent.stream({
     messages: [{
       role: 'user',
       content: `请分析预警事件 ${context.event_no}。当前触发规则为“${context.rule_name}”，异常指标为 ${context.metric_code}。请严格按“测量与数据有效性→异常形态→规格/同批次/正常参考三层对照→时间对齐→成型链与材料链竞争假设→反证及受控验证”的顺序先取证，再形成2到6条待工程师验证的结论。外径异常不得简化为单一工艺参数的直接因果；工具未提供的数据必须写入缺失证据，不得补造。`,
     }],
   }, {
+    streamMode: 'messages',
     recursionLimit: config.maxToolRounds * 2 + 4,
   });
 
+  const streamedMessages: unknown[] = [];
+  for await (const item of messageStream) {
+    const message = (Array.isArray(item) ? item[0] : item) as {
+      tool_call_chunks?: Array<{ index?: number; id?: string; args?: string }>;
+      usage_metadata?: unknown;
+    };
+    if (message?.usage_metadata) streamedMessages.push(message);
+    const chunks = message?.tool_call_chunks;
+    if (!Array.isArray(chunks)) continue;
+    for (const chunk of chunks) {
+      const index = typeof chunk?.index === 'number' ? chunk.index : 0;
+      // 新的一轮工具调用会在同一个 index 上带出新的 id，据此切成独立的累积缓冲。
+      if (typeof chunk?.id === 'string' && chunk.id) toolCallKeyByIndex.set(index, chunk.id);
+      if (typeof chunk?.args !== 'string' || !chunk.args.length) continue;
+      const key = toolCallKeyByIndex.get(index) ?? `index-${index}`;
+      let parser = parsers.get(key);
+      if (!parser) { parser = createConclusionParser(); parsers.set(key, parser); }
+      for (const event of parser.push(chunk.args)) pendingFrames.set(event.index, event);
+      flushFrames();
+    }
+  }
+  flushFrames(true);
+
   await reportAnalysisProgress(reporter, { stage: 'validation', status: 'running', message: '工具调用结束，正在校验结构化分析结果' });
-  if (!result.structuredResponse) throw new Error('Agent未返回符合Schema的结构化分析结果');
-  const output = QualityAnalysisSchema.parse(result.structuredResponse);
-  const messages = Array.isArray(result.messages) ? result.messages : [];
+
+  /**
+   * 权威结果只认流结束后完整的 JSON.parse + zod 校验，不认增量解析结果：
+   * 增量解析只负责页面展示，万一它遇到边界情况，落库的结论也不会被污染。
+   */
+  let output: QualityAnalysisOutput | null = null;
+  for (const parser of parsers.values()) {
+    if (!parser.hasConclusions()) continue;
+    try {
+      output = QualityAnalysisSchema.parse(JSON.parse(parser.raw()));
+      break;
+    } catch {
+      // 不是诊断结构化输出（例如数据工具的参数），继续找下一个
+    }
+  }
+  if (!output) throw new Error('Agent未返回符合Schema的结构化分析结果');
+  const messages = streamedMessages;
   await reportAnalysisProgress(reporter, {
     stage: 'validation', status: 'success', message: `结构化校验通过，生成 ${output.conclusions.length} 条待验证结论`,
     detail: `累计调用 ${toolTrace.length} 次数据工具`,

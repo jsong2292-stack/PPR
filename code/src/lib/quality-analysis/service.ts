@@ -1,13 +1,14 @@
 import { getQualityAgentConfig, type QualityAnalysisMode } from './config';
 import { generateLangChainAgentAnalysis } from './langchain-agent';
 import { generateRuleAnalysis } from './rule-engine';
-import { reportAnalysisProgress, type AnalysisGenerationResult, type AnalysisProgressReporter } from './types';
+import { reportAnalysisProgress, type AnalysisGenerationResult, type AnalysisProgressReporter, type ConclusionDraftReporter } from './types';
 
 /** 根据系统配置选择规则引擎或LangChain Agent；Agent失败时可配置自动降级。 */
 export async function generateQualityAnalysis(
   alertId: number,
   requestedMode?: QualityAnalysisMode,
-  reporter?: AnalysisProgressReporter
+  reporter?: AnalysisProgressReporter,
+  conclusionReporter?: ConclusionDraftReporter
 ): Promise<{ result: AnalysisGenerationResult; configuredMode: QualityAnalysisMode; agentConfigured: boolean }> {
   const config = await getQualityAgentConfig(requestedMode);
   await reportAnalysisProgress(reporter, {
@@ -25,7 +26,7 @@ export async function generateQualityAnalysis(
     return { result: await generateRuleAnalysis(alertId, reason, reporter), configuredMode: config.mode, agentConfigured: false };
   }
   try {
-    return { result: await generateLangChainAgentAnalysis(alertId, config, reporter), configuredMode: config.mode, agentConfigured: true };
+    return { result: await generateLangChainAgentAnalysis(alertId, config, reporter, conclusionReporter), configuredMode: config.mode, agentConfigured: true };
   } catch (error) {
     const reason = `LangChain Agent调用失败：${error instanceof Error ? error.message : '未知错误'}`;
     await reportAnalysisProgress(reporter, { stage: 'fallback', status: 'warning', message: 'Agent调用失败，准备降级到规则引擎', detail: reason });

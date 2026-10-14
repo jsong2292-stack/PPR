@@ -1,4 +1,4 @@
-import type { AnalysisProgressEvent, EightDDraftEvent } from './types';
+import type { AnalysisProgressEvent, ConclusionDraftEvent, EightDDraftEvent } from './types';
 
 /**
  * 统一消费质量分析类的 SSE 流：把 progress 事件交给调用方实时渲染，
@@ -6,13 +6,15 @@ import type { AnalysisProgressEvent, EightDDraftEvent } from './types';
  * 诊断分析（/api/quality/analysis）与 8D 生成（/api/quality/reports/generate）共用同一套协议。
  *
  * 8D 生成额外会推 `draft` 帧：随模型生成把 D1–D8 逐字段写进页面输入框。
- * draft 帧里带的是该字段的完整文本，客户端直接覆盖，不必自己拼接增量。
+ * 诊断分析额外会推 `conclusion` 帧：随模型生成把结论卡片逐条渲染出来。
+ * 两类帧里带的都是该字段/该条结论的**完整**文本，客户端直接覆盖，不必自己拼接增量。
  */
 export async function streamQualityRequest<T>(
   url: string,
   body: Record<string, unknown>,
   onProgress: (event: AnalysisProgressEvent) => void,
-  onDraft?: (event: EightDDraftEvent) => void
+  onDraft?: (event: EightDDraftEvent) => void,
+  onConclusion?: (event: ConclusionDraftEvent) => void
 ): Promise<T> {
   const response = await fetch(url, {
     method: 'POST',
@@ -45,6 +47,8 @@ export async function streamQualityRequest<T>(
       onProgress(payload as AnalysisProgressEvent);
     } else if (eventName === 'draft') {
       onDraft?.(payload as EightDDraftEvent);
+    } else if (eventName === 'conclusion') {
+      onConclusion?.(payload as ConclusionDraftEvent);
     } else if (eventName === 'result') {
       resultReceived = true;
       result = payload as T;

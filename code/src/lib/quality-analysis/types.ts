@@ -21,6 +21,25 @@ export const QualityAnalysisSchema = z.object({
 
 export type QualityAnalysisOutput = z.infer<typeof QualityAnalysisSchema>;
 
+/** 单条待验证结论：与 QualityAnalysisSchema.conclusions 的元素一致。 */
+export type QualityAnalysisConclusion = QualityAnalysisOutput['conclusions'][number];
+
+/**
+ * 生成过程中逐条推送的结论卡片帧。
+ * `conclusion` 是该结论**目前为止**的完整字段文本（不是增量），客户端按字段覆盖即可，
+ * 因此丢帧、乱序都不会把卡片拼错；未出现的字段表示「还没写到」，客户端保留原值。
+ * `persisted=true` 表示这条结论已经落库并带上真实 id，内容与最终结果一致。
+ */
+export interface ConclusionDraftEvent {
+  index: number;
+  conclusion: Partial<QualityAnalysisConclusion>;
+  open: boolean;
+  persisted?: boolean;
+  id?: number;
+}
+
+export type ConclusionDraftReporter = (event: ConclusionDraftEvent) => void;
+
 /**
  * 8D 报告生成 Agent 的结构化输出：字段与 ppr_eight_d_report 的 title / D1–D8 一一对应。
  * 提示词要求区分「工程师已确认」「已否决」「仍待验证」三类输入，不得把未确认假设写成根因。

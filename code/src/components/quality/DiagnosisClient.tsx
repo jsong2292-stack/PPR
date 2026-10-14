@@ -3,11 +3,12 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Bot, Check, ChevronRight, Database, FileSearch, Loader2, RefreshCw, Save, Settings2, X } from 'lucide-react';
+import { Bot, Check, CheckCircle2, ChevronRight, Database, FileSearch, Loader2, RefreshCw, Save, Settings2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -16,10 +17,19 @@ import { EquipmentProcessTrendCard } from './EquipmentProcessTrendCard';
 import { MetricTrendCard, metricLabels } from './MetricTrendCard';
 import { PageHeader } from './PageHeader';
 import { streamQualityRequest } from '@/lib/quality-analysis/stream-client';
+import type { ConclusionDraftEvent, QualityAnalysisConclusion } from '@/lib/quality-analysis/types';
 
 type Row = Record<string, unknown>;
 type AnalysisMode = 'rule' | 'agent';
 type AgentStatus = { mode: AnalysisMode; configured: boolean; model: string; fallbackToRule: boolean; framework: string };
+/** 生成过程中逐条到达的结论卡片：内容够用即可显示，落库后才带 id。 */
+type StreamConclusion = {
+  index: number;
+  conclusion: Partial<QualityAnalysisConclusion>;
+  open: boolean;
+  persisted: boolean;
+  id?: number;
+};
 
 /**
  * 诊断页只处理异常事件：本页由监控页「进入诊断」下钻进入（?alertId=），
@@ -76,6 +86,30 @@ const decisionLabels: Record<string, string> = { pending: '待验证', confirmed
   rejected: 'bg-slate-100 text-slate-600',
 };
 
+/**
+ * 生成中的结论卡片：模型写一条就渲染一张，字段随文本增长补齐。
+ * 只读展示，落库后由下方可编辑的正式卡片接管（内容与序号一一对应）。
+ */
+function StreamingConclusionCard({ item }: { item: StreamConclusion }) {
+  const conclusion = item.conclusion;
+  return <Card className="border-indigo-100 shadow-sm">
+    <CardHeader className="border-b border-slate-100 pb-3">
+      <div className="flex items-center justify-between gap-2">
+        <CardTitle className="text-base">C{item.index + 1} · {conclusion.category || '正在生成…'}</CardTitle>
+        <Badge className={item.open ? 'bg-indigo-50 text-indigo-700' : item.persisted ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}>
+          {item.open ? '生成中' : item.persisted ? '已保存' : '待保存'}
+        </Badge>
+      </div>
+      {conclusion.confidence != null && <p className="text-xs text-slate-500">证据完备度：{Math.round(Number(conclusion.confidence) * 100)}%</p>}
+    </CardHeader>
+    <CardContent className="space-y-4 p-5">
+      <section><Label className="text-xs text-slate-500">待验证结论</Label><p className="mt-1 text-sm font-medium leading-6 text-slate-900">{conclusion.hypothesis || '…'}</p></section>
+      <section className="rounded-lg bg-slate-50 p-3"><div className="mb-1 flex items-center gap-1 text-xs font-semibold text-slate-600"><Database size={13} />支持证据</div><p className="text-xs leading-5 text-slate-600">{conclusion.evidence || '…'}</p></section>
+      {conclusion.validationAction && <section><Label className="text-xs text-slate-500">建议验证动作</Label><p className="mt-1 text-xs leading-5 text-blue-700">{conclusion.validationAction}</p></section>}
+    </CardContent>
+  </Card>;
+}
+
 export function DiagnosisClient() {
   const search = useSearchParams();
   const router = useRouter();
@@ -92,6 +126,10 @@ export function DiagnosisClient() {
   const [processEvents, setProcessEvents] = useState<AnalysisProcessEvent[]>([]);
   const [processExpanded, setProcessExpanded] = useState(false);
   const [processFinished, setProcessFinished] = useState(false);
+  /** 生成过程中逐条到达的结论：写一条渲染一张，全部落库后由 analysis.conclusions 接管。 */
+  const [streamConclusions, setStreamConclusions] = useState<StreamConclusion[]>([]);
+  /** 全部结论渲染完成后弹出「分析完成」。 */
+  const [completed, setCompleted] = useState(false);
   /** 当前分析对应的 8D 报告草稿：由 8D 生成 Agent 写入，用于展示生成状态与草稿预览。 */
   const [report, setReport] = useState<Row | null>(null);
   const [reportReady, setReportReady] = useState(false);
@@ -151,21 +189,58 @@ export function DiagnosisClient() {
     return () => { cancelled = true; };
   }, [analysisId]);
 
+  /**
+   * 结论帧里带的是「该条结论目前为止的完整字段」而不是增量，按序号覆盖即可，
+   * 丢帧或乱序都不会把卡片拼错；帧里没出现的字段保持原值，避免被空内容覆盖。
+   */
+  const applyConclusion = useCallback((event: ConclusionDraftEvent) => {
+    setStreamConclusions((current) => {
+      const next = [...current];
+      const at = next.findIndex((item) => item.index === event.index);
+      const previous: StreamConclusion = at >= 0 ? next[at] : { index: event.index, conclusion: {}, open: false, persisted: false };
+      const conclusion = { ...previous.conclusion };
+      for (const [key, value] of Object.entries(event.conclusion || {})) {
+        if (value === undefined || value === null) continue;
+        (conclusion as Record<string, unknown>)[key] = value;
+      }
+      const merged: StreamConclusion = {
+        index: event.index,
+        conclusion,
+        open: Boolean(event.open) && !event.persisted,
+        persisted: Boolean(event.persisted) || previous.persisted,
+        id: event.id ?? previous.id,
+      };
+      if (at >= 0) next[at] = merged; else next.push(merged);
+      return next.sort((left, right) => left.index - right.index);
+    });
+  }, []);
+
   const generate = async () => {
     if (!alertId) return toast.warning('请选择预警事件');
     setGenerating(true);
     setProcessEvents([]);
     setProcessFinished(false);
     setProcessExpanded(true);
+    setStreamConclusions([]);
+    setCompleted(false);
     try {
-      const result = await streamQualityRequest<{ data: Row }>(
+      const result = await streamQualityRequest<{
+        data: Row;
+        reused?: boolean;
+        generation?: { engineType?: string; modelName?: string | null; latencyMs?: number };
+      }>(
         '/api/quality/analysis',
         { alertId: Number(alertId), mode, regenerate: Boolean(analysis), generatedBy: '质量工程师' },
         (event) => setProcessEvents((current) => [...current, event]),
+        undefined,
+        applyConclusion,
       );
+      // 落库结果与流式卡片序号一一对应，同一批更新里替换，不会出现空白或闪烁。
       setAnalysis(result.data);
+      setStreamConclusions([]);
       if (result.data?.fallback_reason) toast.warning(`Agent已降级：${result.data.fallback_reason}`);
-      else toast.success(mode === 'agent' ? 'LangChain Agent分析已完成' : '规则分析已完成');
+      if (result.reused) toast.success('已复用现有分析结果');
+      else if (result.data) setCompleted(true);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '生成失败');
     } finally {
@@ -330,8 +405,21 @@ export function DiagnosisClient() {
       />
     </Card>
 
-    {/* 空态压成一行提示：原来占 256px 高的占位卡在折叠状态下会留出大片空白。 */}
-    {loading ? <div className="grid h-32 place-items-center"><Loader2 className="animate-spin text-blue-700" /></div> : !analysis ?
+    {/* 生成中：模型写一条结论就渲染一张卡片，不必等整个分析返回；全部落库后由下方正式卡片接管。 */}
+    {generating && <div className="mb-5">
+      <div className="mb-2 flex items-center gap-2 text-xs text-slate-500">
+        <Loader2 className="animate-spin text-indigo-600" size={14} />
+        {streamConclusions.length
+          ? `正在生成结论卡片 · 已输出 ${streamConclusions.length} 条，写好的卡片会立即显示在下方`
+          : '正在取证并生成结论卡片，第一条写好后会立即显示在下方'}
+      </div>
+      {streamConclusions.length > 0 && <div className="grid gap-4 xl:grid-cols-3">
+        {streamConclusions.map((item) => <StreamingConclusionCard key={item.index} item={item} />)}
+      </div>}
+    </div>}
+
+    {/* 空态压成一行提示：原来占 256px 高的占位卡在折叠状态下会留出大片空白。生成中不显示空态，改由上方逐条卡片呈现。 */}
+    {loading ? <div className="grid h-32 place-items-center"><Loader2 className="animate-spin text-blue-700" /></div> : generating ? <></> : !analysis ?
       <Card className="gap-0 border-dashed border-slate-300 py-0"><CardContent className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 px-4 py-6 text-center"><Bot className="text-slate-400" size={16} /><b className="text-sm text-slate-700">尚未生成诊断分析</b><span className="text-xs text-slate-500">选择模式后点击「生成分析」，系统会保存证据、工具轨迹和待验证结论。</span></CardContent></Card> : <>
         {Boolean(analysis.fallback_reason) && <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><b>Agent降级说明：</b>{String(analysis.fallback_reason)}</div>}
         <Card className="mb-5 border-indigo-200 bg-indigo-50/50 shadow-sm"><CardContent className="flex gap-3 p-5"><Bot className="mt-0.5 shrink-0 text-indigo-600" /><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><b className="text-indigo-950">分析摘要</b><Badge className={engineType === 'agent' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}>{engineType === 'agent' ? 'LangChain Agent' : '规则引擎'}</Badge>{Boolean(analysis.model_name) && <Badge variant="outline">{String(analysis.model_name)}</Badge>}</div><p className="mt-2 text-sm leading-6 text-indigo-900">{String(analysis.summary)}</p><p className="mt-2 text-xs text-indigo-600">{String(analysis.run_no)} · {String(analysis.prompt_version || '')} · {String(analysis.latency_ms || 0)} ms · 生成于 {String(analysis.generated_at)}</p></div></CardContent></Card>
@@ -380,5 +468,30 @@ export function DiagnosisClient() {
       </>}
 
     </>}
+
+    {/* 全部结论渲染完成后的收尾弹窗：确认本次生成了什么，并给出下一步入口。 */}
+    <Dialog open={completed} onOpenChange={setCompleted}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><CheckCircle2 className="text-emerald-600" size={18} />分析完成</DialogTitle>
+          <DialogDescription>
+            已生成 {((analysis?.conclusions as Row[]) || []).length} 条待验证结论{analysis ? `，保存在分析任务 ${String(analysis.run_no)}` : ''}。结论只是待验证假设，请逐条填写实际发现与工程师意见后再确认或驳回。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3 text-sm">
+          <div><span className="text-xs text-slate-500">分析引擎</span><b className="mt-0.5 block">{engineType === 'agent' ? 'LangChain Agent' : '规则引擎'}</b></div>
+          <div><span className="text-xs text-slate-500">模型</span><b className="mt-0.5 block">{String(analysis?.model_name || '规则模板（不调用模型）')}</b></div>
+          <div><span className="text-xs text-slate-500">结论条数</span><b className="mt-0.5 block">{((analysis?.conclusions as Row[]) || []).length} 条</b></div>
+          <div><span className="text-xs text-slate-500">耗时</span><b className="mt-0.5 block">{String(analysis?.latency_ms || 0)} ms</b></div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setCompleted(false)}>查看结论</Button>
+          <Button className="bg-indigo-600 hover:bg-indigo-700" disabled={!analysisId || navigating} onClick={() => { setCompleted(false); goGenerate(); }}>
+            {navigating ? <Loader2 className="animate-spin" size={16} /> : <Bot size={16} />}
+            生成 8D 报告
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </>;
 }

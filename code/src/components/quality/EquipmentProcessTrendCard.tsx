@@ -40,7 +40,7 @@ interface BatchInfo {
   end_time?: string;
 }
 
-/** 聚焦窗口：异常时刻前后各 4 小时，与规则引擎 get_equipment_window 的默认口径一致 */
+/** 聚焦窗口：异常样管检验时刻前后各 4 小时，与规则引擎 get_equipment_window 的默认口径一致 */
 const FOCUS_MINUTES = 240;
 /** 同一指标可能由多台设备采集（例如两台挤出机都报温度），按设备逐条曲线 */
 const SERIES_COLORS = ['#2563eb', '#0d9488', '#7c3aed', '#d97706', '#0891b2', '#65a30d'];
@@ -72,7 +72,7 @@ export interface EquipmentProcessTrendCardProps {
   /** 当前异常事件所属批次；为 null 时不渲染 */
   batchId: number | null;
   batchNo?: string;
-  /** 当前异常事件的检验时刻，用于在图上标出异常发生的位置 */
+  /** 当前异常事件的检验时刻，用于在图上标出异常样管被检验的位置 */
   alertTime?: string;
   /** 当前异常事件的指标名（如「不圆度」），仅用于说明文字 */
   alertMetricLabel?: string;
@@ -85,7 +85,11 @@ export interface EquipmentProcessTrendCardProps {
  * 指标口径完全由设备类型决定（挤出机=温度/压力，牵引机=牵引速度），
  * 与「设备台账 → 采集项」页面、Excel 模板共用 quality-equipment.ts 的定义。
  *
- * 这里刻意不做任何相关性计算：同期变化只是排查线索，不是因果结论。
+ * 这里刻意不做任何相关性计算：时间接近只是排查线索，不是因果结论。
+ *
+ * 与 rule-engine 的「设备时序待对齐」结论保持同一口径：图上的红线是异常样管的
+ * **检验时刻**，不是该样管在设备处的生产时刻。未完成生产时间、长度码、设备距离和
+ * 检测延迟对齐前，这些曲线不能称为该样管的对应参数。
  */
 export function EquipmentProcessTrendCard({ batchId, batchNo, alertTime, alertMetricLabel }: EquipmentProcessTrendCardProps) {
   const { user } = useAuth();
@@ -106,12 +110,20 @@ export function EquipmentProcessTrendCard({ batchId, batchNo, alertTime, alertMe
     setError('');
     try {
       const response = await fetch(`/api/quality/batches/${batchId}/equipment-readings`);
-      const json = await response.json();
-      if (!response.ok) throw new Error(json.error || '加载设备采集数据失败');
-      setBatch(json.batch ?? null);
-      setEquipments(json.equipments ?? []);
-      setLinked(json.linkedEquipment ?? []);
-      setReadings(json.readings ?? []);
+      // 先取文本再解析：路由未注册时服务端返回的是 HTML 404 页，
+      // 直接 response.json() 只会抛出 "Unexpected token '<'" 这种看不懂的报错。
+      const raw = await response.text();
+      let json: Row = {};
+      try {
+        json = raw ? (JSON.parse(raw) as Row) : {};
+      } catch {
+        throw new Error(`接口返回了非 JSON 响应（HTTP ${response.status}）：请确认已登录，且服务端已重新加载路由。`);
+      }
+      if (!response.ok) throw new Error(String(json.error || `加载设备采集数据失败（HTTP ${response.status}）`));
+      setBatch((json.batch as BatchInfo) ?? null);
+      setEquipments((json.equipments as EquipmentInfo[]) ?? []);
+      setLinked((json.linkedEquipment as LinkedEquipment[]) ?? []);
+      setReadings((json.readings as Row[]) ?? []);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '加载失败');
       setBatch(null); setEquipments([]); setLinked([]); setReadings([]);
@@ -124,7 +136,7 @@ export function EquipmentProcessTrendCard({ batchId, batchNo, alertTime, alertMe
 
   const alertTs = useMemo(() => (alertTime ? toTime(alertTime) : null), [alertTime]);
 
-  /** 聚焦窗口只保留异常时刻前后各 4 小时；没有异常时刻时退化为整批次 */
+  /** 聚焦窗口只保留异常样管检验时刻前后各 4 小时；没有检验时刻时退化为整批次 */
   const visible = useMemo(() => {
     if (windowMode !== 'focus' || alertTs === null) return readings;
     return readings.filter((row) => {
@@ -184,7 +196,7 @@ export function EquipmentProcessTrendCard({ batchId, batchNo, alertTime, alertMe
     return result;
   }, [usedFields, visible, equipments, alertTs]);
 
-  /** 异常时刻落在当前视图采集数据的时间范围之外：整批次视图下用来解释「为什么图上没有标线」 */
+  /** 检验时刻落在当前视图采集数据的时间范围之外：整批次视图下用来解释「为什么图上没有标线」 */
   const alertOutOfRange = useMemo(() => {
     if (alertTs === null) return false;
     const times = visible.map((row) => toTime(row.collect_time)).filter((time): time is number => time !== null);
@@ -229,7 +241,7 @@ export function EquipmentProcessTrendCard({ batchId, batchNo, alertTime, alertMe
           {chart.seriesEquipments.length > 1 ? <Legend wrapperStyle={{ fontSize: 11 }} /> : null}
           {chart.markAnomaly ? <ReferenceLine
             x={alertTs as number} stroke={ANOMALY_COLOR} strokeDasharray="5 5"
-            label={{ value: `异常 ${clockLabel(alertTs as number)}`, fontSize: 10, fill: ANOMALY_COLOR, position: 'insideTopRight' }}
+            label={{ value: `检验时刻 ${clockLabel(alertTs as number)}`, fontSize: 10, fill: ANOMALY_COLOR, position: 'insideTopRight' }}
           /> : null}
           {chart.seriesEquipments.map((equipment, index) => <Line
             key={equipment.id}
@@ -254,11 +266,11 @@ export function EquipmentProcessTrendCard({ batchId, batchNo, alertTime, alertMe
           <CardTitle className="flex items-center gap-2 text-base"><TrendingUp size={16} className="text-blue-700" />设备工艺参数趋势</CardTitle>
           <p className="mt-1 text-xs text-slate-500">
             数据取自设备采集数据（批次 {batch?.batch_no ?? batchNo ?? '—'}{batch?.spec_name ? ` · ${batch.spec_name}` : ''}）
-            {alertMetricLabel ? `；红色虚线为异常指标「${alertMetricLabel}」的检验时刻` : ''}
+            {alertMetricLabel ? `；红色虚线为异常指标「${alertMetricLabel}」的检验时刻（非生产时刻）` : ''}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant={windowMode === 'focus' ? 'default' : 'outline'} className={windowMode === 'focus' ? 'bg-blue-700 hover:bg-blue-800' : ''} onClick={() => setWindowMode('focus')} disabled={alertTs === null}>异常前后±4h</Button>
+          <Button size="sm" variant={windowMode === 'focus' ? 'default' : 'outline'} className={windowMode === 'focus' ? 'bg-blue-700 hover:bg-blue-800' : ''} onClick={() => setWindowMode('focus')} disabled={alertTs === null}>检验时刻±4h</Button>
           <Button size="sm" variant={windowMode === 'batch' ? 'default' : 'outline'} className={windowMode === 'batch' ? 'bg-blue-700 hover:bg-blue-800' : ''} onClick={() => setWindowMode('batch')}>整个批次</Button>
           <Button size="sm" variant="ghost" onClick={() => { void load(); }} disabled={loading}><RefreshCw size={15} className={loading ? 'animate-spin' : ''} />刷新</Button>
         </div>
@@ -272,7 +284,7 @@ export function EquipmentProcessTrendCard({ batchId, batchNo, alertTime, alertMe
         : <>
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <AlertTriangle size={14} className="shrink-0" />
-            <span>设备参数与产品指标的同期变化只能作为排查线索，<b>不能直接判定为根因</b>；本图不做相关性计算。</span>
+            <span>设备记录与样管<b>尚未完成时序对齐</b>：检验时间不当然等于该样管在设备处的生产时间。曲线仅按检验时刻距离关联，可作为排查线索，<b>不能称为该样管的对应参数</b>，也不能据此判定因果；本图不做相关性计算。</span>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -286,12 +298,12 @@ export function EquipmentProcessTrendCard({ batchId, batchNo, alertTime, alertMe
           </div>
 
           {focusedEmpty ? <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-            异常时刻前后 4 小时内没有采集记录，但该批次共有 {readings.length} 条数据。
+            检验时刻前后 4 小时内没有采集记录，但该批次共有 {readings.length} 条数据。
             <Button size="sm" variant="outline" className="ml-2" onClick={() => setWindowMode('batch')}>查看整个批次</Button>
           </div> : null}
 
           {charts.length === 0 ? <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-            {isFocus ? '异常时刻前后 4 小时内的采集记录均为空值。' : '该批次的采集记录均为空值。'}
+            {isFocus ? '检验时刻前后 4 小时内的采集记录均为空值。' : '该批次的采集记录均为空值。'}
           </div> : <>
             <p className="text-xs text-slate-500">点击任意一张小图，可在下方单独放大查看；再次点击同一张收起。</p>
             <div className={`grid gap-4 ${charts.length > 1 ? 'md:grid-cols-2 xl:grid-cols-3' : ''}`}>
@@ -331,7 +343,7 @@ export function EquipmentProcessTrendCard({ batchId, batchNo, alertTime, alertMe
                 <p className="mt-1 text-xs text-slate-500">
                   {zoomedChart.seriesEquipments.map((equipment) => `${equipment.name}（${equipment.type_name}）`).join('、')}
                   {' · '}{zoomedChart.data.length} 个采集点 · 单位 {zoomedChart.meta.unit}
-                  {zoomedChart.markAnomaly ? `；红色虚线为异常时刻 ${timeLabel(alertTime)}` : ''}
+                  {zoomedChart.markAnomaly ? `；红色虚线为异常样管的检验时刻 ${timeLabel(alertTime)}（非生产时刻）` : ''}
                 </p>
               </div>
               <Button size="sm" variant="outline" onClick={() => setZoomedField(null)}><X size={15} />收起</Button>
@@ -340,7 +352,7 @@ export function EquipmentProcessTrendCard({ batchId, batchNo, alertTime, alertMe
           </div> : null}
 
           {!isFocus && alertOutOfRange ? <p className="text-xs text-slate-500">
-            当前显示整个批次；异常时刻 {timeLabel(alertTime)} 不在该批次采集数据的时间范围（{timeLabel(readings[0]?.collect_time)} ~ {timeLabel(readings[readings.length - 1]?.collect_time)}）内，图上未标出。
+            当前显示整个批次；异常样管的检验时刻 {timeLabel(alertTime)} 不在该批次采集数据的时间范围（{timeLabel(readings[0]?.collect_time)} ~ {timeLabel(readings[readings.length - 1]?.collect_time)}）内，图上未标出。
           </p> : null}
         </>}
     </CardContent>

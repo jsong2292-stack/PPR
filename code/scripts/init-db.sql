@@ -1,8 +1,31 @@
--- ==========================================
--- 通用平台脚手架 - 数据库初始化脚本
+-- ============================================================================
+-- PPR 过程质量异常智能分析助手 - 数据库初始化 DDL（clean init）
 -- 数据库：MySQL 8.0+
--- 执行：mysql -h 127.0.0.1 -P 3306 -u root -p platform_demo < scripts/init-db.sql
--- ==========================================
+--
+-- 执行方式（二选一）：
+--   1) 命令行 ：mysql -h 127.0.0.1 -P 3306 -u root -p ppr_quality < scripts/init-db.sql
+--   2) 项目脚本：pnpm db:init（先执行本文件，再依次执行 scripts/migrations/*.sql）
+--
+-- 本文件是**唯一权威建表来源**，已经包含 scripts/migrations/001 ~ 012 的全部结构变更，
+-- 在空库上执行即可得到与最新代码一致的库结构。
+-- 重复执行安全：建表用 CREATE TABLE IF NOT EXISTS，种子数据用 ON DUPLICATE KEY UPDATE。
+--
+-- 初始化后的数据范围（2026-10-14 整理版）：
+--   保留 - 系统管理    ：产品类别、质量指标与影响因素、设备类型
+--   保留 - 后台基础数据：管理员与账号、系统配置、产品规格、设备台账
+--   清空 - 数据源管理  ：产品检验记录、设备采集数据
+--                        （批次总览 ppr_batch 由这两张表实时聚合，因此同样为空）
+--   清空 - 质量监控    ：预警事件（改由预警判定引擎在导入数据时自动生成）
+--   清空 - 历史分析    ：分析任务、分析结论、8D 报告
+--   清空 - 旧原型遗留表：本文件不包含任何旧版原型表（alert_event / data_source /
+--                        production_batch / sys_user / inspection_record / product_data /
+--                        v_product_data_wide 等），当前代码已不再使用，新库不再创建。
+--
+-- 注意：本文件只负责「建表 + 预置基础数据」，不含任何 DELETE / TRUNCATE，
+--       因此在已有业务的库上重复执行**不会**清空业务数据。
+--       如需在已有库上清空业务数据、保留系统管理与基础数据，请执行
+--       scripts/clear-business-data.sql。
+-- ============================================================================
 
 SET NAMES utf8mb4;
 
@@ -31,23 +54,8 @@ CREATE TABLE IF NOT EXISTS system_config (
   KEY system_config_key_idx (`key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO system_config (`key`, value, description) VALUES
-  ('enable_register', 'true', '是否开放用户注册（true/false）'),
-  ('enable_file_upload', 'true', '是否开放文件上传（true/false）'),
-  ('enable_file_preview', 'true', '是否启用文件在线预览（true/false）'),
-  ('max_file_size', '500', '文件上传大小上限（MB）'),
-  ('enable_sso_auto_login', 'false', '未登录时是否自动跳转单点登录（true/false）'),
-  ('quality_analysis_mode', 'rule', '异常诊断模式：rule规则引擎、agent LangChain智能体'),
-  ('quality_agent_model', 'gpt-6-luna', 'LangChain Agent使用的模型名称'),
-  ('quality_agent_fallback_to_rule', 'true', 'Agent失败或未配置密钥时是否自动降级规则引擎'),
-  ('quality_agent_max_tool_rounds', '8', 'Agent单次分析最大工具调用轮数'),
-  ('quality_agent_reasoning_effort', 'low', 'Agent推理强度：none/minimal/low/medium/high'),
-  ('wecom_alert_enabled', 'false', '中/高风险预警是否推送到企业微信消息推送（原群机器人）（true/false）'),
-  ('wecom_alert_webhook', '', '企业微信「消息推送」（原群机器人）Webhook地址，入口在群聊右上角···，不在管理后台'),
-  ('wecom_alert_min_level', 'medium', '触发推送的最低风险级别：medium=中风险及以上、high=仅高风险'),
-  ('wecom_alert_mention_list', '', '推送消息需要@的成员userid，多个用逗号分隔，留空表示不@人'),
-  ('wecom_alert_mention_all', 'false', '推送中/高风险预警时是否@所有人（true/false）')
-ON DUPLICATE KEY UPDATE `key` = `key`;
+-- 注：system_config 的初始取值统一放在文件末尾的「初始化数据」一节，
+--     避免同一份种子数据在文件里出现两处、后一处又覆盖不回前一处。
 
 -- ==========================================
 -- 用户
@@ -541,66 +549,108 @@ CREATE TABLE IF NOT EXISTS ppr_eight_d_report (
 -- 历史分析列表直接查 ppr_eight_d_report，点进去复用同一套报告页继续编辑。
 -- 早期的 ppr_history_archive 归档快照表已废弃，见 scripts/migrations/012_drop_history_archive.sql。
 
--- 平台演示管理员：仅用于本地首次启动，生产部署必须修改密码或通过安装向导创建管理员。
-INSERT INTO users (id, phone, email, nickname, password, role, status, auth_provider)
-VALUES ('00000000-0000-0000-0000-000000000001', 'admin', 'admin@local.demo', '质量平台管理员', '$2b$10$Xn3Xw9bnTqTNYfns8Ig.reoOWmU9G3V3btkuB2o/Qmbt2yhf33Wdy', 'admin', 'active', 'local')
-ON DUPLICATE KEY UPDATE nickname = VALUES(nickname), role = 'admin', status = 'active';
+-- ============================================================================
+-- 初始化数据：系统管理 + 后台基础数据
+--
+-- 只预置下面这些内容（均为可替换的本地演示基础数据，用 ON DUPLICATE KEY 保证可重复执行）：
+--   后台基础数据：管理员与账号、系统配置
+--   系统管理    ：产品类别、质量指标与影响因素、设备类型
+--   基础数据    ：产品规格、设备台账
+--
+-- 不预置（由业务操作自然产生，故新库中「数据源管理 / 质量监控 / 历史分析」都是空的）：
+--   数据源管理：产品检验记录 ppr_product_measurement、设备采集数据 ppr_equipment_reading
+--   质量监控  ：预警事件 ppr_alert_event
+--   历史分析  ：分析任务 ppr_analysis_run、分析结论 ppr_analysis_conclusion、8D 报告 ppr_eight_d_report
+-- ============================================================================
 
--- 业务演示种子：均为可替换的本地模拟数据，用于串通平台全流程。
+-- ---------------------------------------------------------------------------
+-- 后台基础数据 1/2：账号
+-- 本地演示管理员仅用于本地首次启动，生产部署必须改密码或通过安装向导创建管理员。
+-- 演示口令：Admin@123（口令哈希写死在下面）。
+-- ---------------------------------------------------------------------------
+INSERT INTO users (id, phone, email, nickname, password, role, status, auth_provider) VALUES
+  ('00000000-0000-0000-0000-000000000001', 'admin', 'admin@local.demo', '质量平台管理员', '$2b$10$Xn3Xw9bnTqTNYfns8Ig.reoOWmU9G3V3btkuB2o/Qmbt2yhf33Wdy', 'admin', 'active', 'local')
+ON DUPLICATE KEY UPDATE nickname = VALUES(nickname), role = VALUES(role), status = VALUES(status);
+
+-- 本地测试账号（可选）：不需要时直接删掉这一条 INSERT 即可。
+INSERT INTO users (id, phone, email, nickname, password, role, status, auth_provider) VALUES
+  ('3c5612ad-c047-4dda-b6f5-d10a522db0a8', 'wzh', NULL, 'wzh', '$2b$12$TuLovy6RytO0.AaVABD/AeSeyrgKAZio9i10JQI.JQuEi944WedHm', 'user', 'active', 'local')
+ON DUPLICATE KEY UPDATE nickname = VALUES(nickname), role = VALUES(role), status = VALUES(status);
+
+-- ---------------------------------------------------------------------------
+-- 后台基础数据 2/2：系统配置
+-- 取值沿用整理时的当前配置（诊断模式 agent、模型 deepseek-v4-flash、企微 Webhook 已填写）。
+-- 已存在的键只刷新说明文字，不覆盖管理员在「系统设置」里改过的 value。
+-- ---------------------------------------------------------------------------
+INSERT INTO system_config (`key`, value, description) VALUES
+  ('enable_register', 'true', '是否开放用户注册（true/false）'),
+  ('enable_file_upload', 'true', '是否开放文件上传（true/false）'),
+  ('enable_file_preview', 'true', '是否启用文件在线预览（true/false）'),
+  ('max_file_size', '500', '文件上传大小上限（MB）'),
+  ('enable_sso_auto_login', 'false', '未登录时是否自动跳转单点登录（true/false）'),
+  ('quality_analysis_mode', 'agent', '异常诊断模式：rule规则引擎、agent LangChain智能体'),
+  ('quality_agent_model', 'deepseek-v4-flash', 'LangChain Agent使用的模型名称'),
+  ('quality_agent_fallback_to_rule', 'true', 'Agent失败或未配置密钥时是否自动降级规则引擎'),
+  ('quality_agent_max_tool_rounds', '8', 'Agent单次分析最大工具调用轮数'),
+  ('quality_agent_reasoning_effort', 'low', 'Agent推理强度：none/minimal/low/medium/high'),
+  ('wecom_alert_enabled', 'false', '中/高风险预警是否推送到企业微信消息推送（原群机器人）（true/false）'),
+  ('wecom_alert_webhook', 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=171d6761-b612-46a1-b81e-f656315d807d', '企业微信「消息推送」（原群机器人）Webhook地址，入口在群聊右上角···，不在管理后台'),
+  ('wecom_alert_min_level', 'medium', '触发推送的最低风险级别：medium=中风险及以上、high=仅高风险'),
+  ('wecom_alert_mention_list', '', '推送消息需要@的成员userid，多个用逗号分隔，留空表示不@人'),
+  ('wecom_alert_mention_all', 'false', '推送中/高风险预警时是否@所有人（true/false）')
+ON DUPLICATE KEY UPDATE description = VALUES(description);
+
+-- ---------------------------------------------------------------------------
+-- 系统管理 1/3：产品类别
+-- ---------------------------------------------------------------------------
 INSERT INTO ppr_product_category (id, code, name, description, status) VALUES
-  (1, 'CAT-PPR', 'PPR 管材', '无规共聚聚丙烯管材', 'enabled'),
-  (2, 'CAT-FITTING', 'PPR 管件', 'PPR 配套管件', 'enabled')
-ON DUPLICATE KEY UPDATE name=VALUES(name), description=VALUES(description), status=VALUES(status);
+  (1, 'CAT-PPR', 'PPR 管材', '无规共聚聚丙烯管材', 'enabled')
+ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), status = VALUES(status);
 
+-- ---------------------------------------------------------------------------
+-- 基础数据 1/3：产品规格
+-- 判定限值的唯一来源：最大/最小外径、最大/最小壁厚、不圆度上限。
+-- ---------------------------------------------------------------------------
 INSERT INTO ppr_product_spec (id, code, name, category_id, outer_diameter_mm, wall_thickness_mm, outer_lower_mm, outer_upper_mm, wall_lower_mm, wall_upper_mm, ovality_upper_mm, status) VALUES
-  (1, 'SPEC-25X4.2', 'PPR S2.5 25×4.2 瓷芯管', 1, 25.000, 4.200, 25.000, 25.500, 4.200, 4.800, 0.350, 'enabled'),
-  (2, 'SPEC-20X3.4', 'PPR S2.5 20×3.4 管', 1, 20.000, 3.400, 20.000, 20.400, 3.400, 4.000, 0.300, 'enabled')
-ON DUPLICATE KEY UPDATE name=VALUES(name), category_id=VALUES(category_id), status=VALUES(status);
+  (1, 'SPEC-25X4.2', 'PPR S2.5 25×4.2 瓷芯管', 1, 25.000, 4.200, 25.000, 25.500, 4.200, 4.800, 0.350, 'enabled')
+ON DUPLICATE KEY UPDATE name = VALUES(name), category_id = VALUES(category_id), outer_lower_mm = VALUES(outer_lower_mm), outer_upper_mm = VALUES(outer_upper_mm), wall_lower_mm = VALUES(wall_lower_mm), wall_upper_mm = VALUES(wall_upper_mm), ovality_upper_mm = VALUES(ovality_upper_mm), status = VALUES(status);
 
+-- ---------------------------------------------------------------------------
+-- 系统管理 2/3：设备类型
+-- ---------------------------------------------------------------------------
 INSERT INTO ppr_equipment_type (id, code, name, description, status) VALUES
   (1, 'ETYPE-EXTRUDER', '挤出机', '负责塑化与挤出成型，采集温度与压力', 'enabled'),
   (2, 'ETYPE-HAULOFF', '牵引机', '负责稳定牵引速度，采集牵引速度', 'enabled')
-ON DUPLICATE KEY UPDATE name=VALUES(name), description=VALUES(description), status=VALUES(status);
+ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), status = VALUES(status);
 
+-- ---------------------------------------------------------------------------
+-- 基础数据 2/3：设备台账
+-- ---------------------------------------------------------------------------
 INSERT INTO ppr_equipment (id, code, name, type_id, line_name, status, description) VALUES
   (1, 'EQ-EX-01', '1号挤出机', 1, '演示线 A', 'enabled', 'PPR管材主挤出设备'),
   (2, 'EQ-HA-01', '1号牵引机', 2, '演示线 A', 'enabled', 'PPR管材牵引设备')
-ON DUPLICATE KEY UPDATE name=VALUES(name), type_id=VALUES(type_id), line_name=VALUES(line_name), status=VALUES(status);
+ON DUPLICATE KEY UPDATE name = VALUES(name), type_id = VALUES(type_id), line_name = VALUES(line_name), status = VALUES(status);
 
--- 生产批次不预置数据：批次由产品检验数据 + 设备采集数据按批次号实时聚合出来（见 ppr_batch 视图），
--- 没有检验记录或采集数据的批次号不会出现在批次清单里。
+-- ---------------------------------------------------------------------------
+-- 系统管理 3/3：质量指标与影响因素
+-- 纯指标字典：lower_limit / upper_limit 已弃用（判定限值统一取 ppr_product_spec），
+-- 这里保留整理时的历史取值，界面不再维护、也不参与任何判定。
+-- ---------------------------------------------------------------------------
+INSERT INTO ppr_metric (id, code, name, unit, lower_limit, upper_limit, influences, description, status) VALUES
+  (1, 'outer_diameter', '外径', 'mm', 25.0000, 25.5000, '定径套、真空度、冷却水温、牵引速度', '测量管材外径；正式判定以适用标准和产品规格为准', 'enabled'),
+  (2, 'min_wall_thickness', '壁厚', 'mm', 4.2000, 4.8000, '挤出量、牵引速度、模具偏心、原料波动', '仅最薄点不能代表整体壁厚分布', 'enabled'),
+  (3, 'ovality', '不圆度', 'mm', 0.0000, 0.3500, '定径冷却、支撑、牵引、测量截面', '同一样管同一截面最大外径减最小外径', 'enabled')
+ON DUPLICATE KEY UPDATE name = VALUES(name), unit = VALUES(unit), influences = VALUES(influences), description = VALUES(description), status = VALUES(status);
 
-INSERT INTO ppr_metric (id, code, name, unit, influences, description, status) VALUES
-  (1, 'outer_diameter', '外径', 'mm', '定径套、真空度、冷却水温、牵引速度', '测量管材外径；判定限值取产品规格，正式判定以适用标准为准', 'enabled'),
-  (2, 'min_wall_thickness', '壁厚', 'mm', '挤出量、牵引速度、模具偏心、原料波动', '仅最薄点不能代表整体壁厚分布', 'enabled'),
-  (3, 'ovality', '不圆度', 'mm', '定径冷却、支撑、牵引、测量截面', '同一样管同一截面最大外径减最小外径', 'enabled')
-ON DUPLICATE KEY UPDATE name=VALUES(name), unit=VALUES(unit), influences=VALUES(influences), status=VALUES(status);
-
-INSERT INTO ppr_product_measurement (id, record_no, sample_no, batch_no, spec_id, production_group, batch_start_time, inspect_time, outer_diameter_mm, min_wall_thickness_mm, max_wall_thickness_mm, max_outer_diameter_mm, min_outer_diameter_mm, ovality_mm, data_source, quality_flag, remark) VALUES
-  (1, 'IR-20261010-001', 'S-001', '12121D0032', 1, '甲班', '2026-10-10 06:00:00', '2026-10-10 08:20:00', 25.230, 4.320, 4.430, 25.310, 25.120, 0.190, 'QMS', 'normal', '基线点'),
-  (2, 'IR-20261010-002', 'S-002', '12121D0032', 1, '甲班', '2026-10-10 06:00:00', '2026-10-10 09:05:00', 25.240, 4.290, 4.410, 25.330, 25.110, 0.220, 'QMS', 'medium', '壁厚呈下降趋势'),
-  (3, 'IR-20261010-003', 'S-003', '12121D0032', 1, '甲班', '2026-10-10 06:00:00', '2026-10-10 09:37:00', 25.250, 4.260, 4.390, 25.350, 25.100, 0.250, 'QMS', 'medium', '壁厚趋近下限'),
-  (4, 'IR-20261010-004', 'S-004', '12121D0032', 1, '甲班', '2026-10-10 06:00:00', '2026-10-10 10:15:00', 25.260, 4.270, 4.420, 25.360, 25.120, 0.240, 'QMS', 'medium', '连续3点趋近下限，未越限'),
-  (5, 'IR-20261011-001', 'S-101', '12121D0033', 1, '乙班', '2026-10-11 06:00:00', '2026-10-11 08:00:00', 25.220, 4.340, 4.460, 25.320, 25.100, 0.220, 'QMS', 'normal', '参考批次'),
-  (6, 'IR-20261011-002', 'S-102', '12121D0033', 1, '乙班', '2026-10-11 06:00:00', '2026-10-11 09:00:00', 25.230, 4.330, 4.450, 25.550, 25.120, 0.430, 'QMS', 'high', '不圆度超过演示上限'),
-  (7, 'IR-20261011-003', 'S-103', '12121D0033', 1, '乙班', '2026-10-11 06:00:00', '2026-10-11 10:00:00', 25.240, 4.350, 4.470, 25.340, 25.110, 0.230, 'QMS', 'normal', '恢复正常'),
-  (8, 'IR-20261012-001', 'S-201', '12121D0034', 1, '甲班', '2026-10-12 06:00:00', '2026-10-12 08:00:00', 25.210, 4.360, 4.480, 25.310, 25.100, 0.210, 'QMS', 'normal', '参考批次'),
-  (9, 'IR-20261012-002', 'S-202', '12121D0034', 1, '甲班', '2026-10-12 06:00:00', '2026-10-12 09:00:00', 25.220, 4.380, 4.490, 25.320, 25.100, 0.220, 'QMS', 'normal', '参考批次'),
-  (10, 'IR-20261012-003', 'S-203', '12121D0034', 1, '甲班', '2026-10-12 06:00:00', '2026-10-12 10:00:00', 25.230, 4.370, 4.500, 25.330, 25.110, 0.220, 'QMS', 'normal', '参考批次'),
-  (11, 'IR-20261012-004', 'S-204', '12121D0034', 1, '甲班', '2026-10-12 06:00:00', '2026-10-12 11:00:00', 25.220, 4.390, 4.510, 25.320, 25.100, 0.220, 'QMS', 'normal', '参考批次'),
-  (12, 'IR-20261012-005', 'S-205', '12121D0034', 1, '甲班', '2026-10-12 06:00:00', '2026-10-12 12:00:00', 25.230, 4.380, 4.500, 25.330, 25.110, 0.220, 'QMS', 'normal', '参考批次'),
-  (13, 'IR-20261012-006', 'S-206', '12121D0034', 1, '甲班', '2026-10-12 06:00:00', '2026-10-12 13:00:00', 25.240, 4.390, 4.510, 25.340, 25.120, 0.220, 'QMS', 'normal', '参考批次'),
-  (14, 'IR-20261012-007', 'S-207', '12121D0034', 1, '甲班', '2026-10-12 06:00:00', '2026-10-12 14:00:00', 25.230, 4.370, 4.490, 25.330, 25.110, 0.220, 'QMS', 'normal', '参考批次'),
-  (15, 'IR-20261012-008', 'S-208', '12121D0034', 1, '甲班', '2026-10-12 06:00:00', '2026-10-12 15:00:00', 25.220, 4.380, 4.500, 25.320, 25.100, 0.220, 'QMS', 'normal', '参考批次'),
-  (16, 'IR-20261012-009', 'S-209', '12121D0035', 2, '乙班', '2026-10-12 18:00:00', '2026-10-12 20:00:00', 25.180, 4.310, 4.420, 25.280, 25.090, 0.190, 'MES_IMPORT', 'error', '记录值疑似跨规格录入')
-ON DUPLICATE KEY UPDATE sample_no=VALUES(sample_no), batch_no=VALUES(batch_no), spec_id=VALUES(spec_id), inspect_time=VALUES(inspect_time), outer_diameter_mm=VALUES(outer_diameter_mm), min_wall_thickness_mm=VALUES(min_wall_thickness_mm), ovality_mm=VALUES(ovality_mm), quality_flag=VALUES(quality_flag), remark=VALUES(remark);
-
--- 设备采集数据不预置演示数据：
--- 采集数据现在挂在「设备台账 → 设备 → 生产批次 → 采集项」下，按批次导入。
--- 演示数据见 PPR/测试数据/设备采集模拟数据/*.xlsx，从采集项页面的「Excel 导入」导入即可。
-
--- 预警事件不预置演示数据：ppr_alert_event 全部由预警判定引擎在导入 / 新增 / 编辑产品数据时自动生成。
--- 判定逻辑见 code/src/lib/quality-analysis/alert-engine.ts：
---   R3 超出产品规格标准区间              → 高风险
---   R5 连续 3 点进入接近带（区间宽 15%）  → 中风险
---   R0 落在标准区间内                    → 正常（状态直接置为 closed，不占待处理队列）
+-- ---------------------------------------------------------------------------
+-- 基础数据 3/3：业务流水（不预置，保持空库）
+--
+-- 生产批次不落表：批次清单由「产品检验数据 + 设备采集数据」按 batch_no 实时聚合（见 ppr_batch 视图）。
+-- 两张子表都为空，所以新库的批次总览、质量监控队列、历史分析列表都是空的。
+--   产品检验数据：在「数据源管理 / 产品台账」按规格导入 Excel，导入后按规格限值自动重算预警事件
+--   设备采集数据：在「数据源管理 / 设备台账」逐台设备、按批次导入 Excel
+--   预警事件    ：由判定引擎在导入 / 新增 / 编辑产品数据时自动生成
+--                 （R3 超出规格标准区间 → 高风险；R5 连续 3 点进入接近带 → 中风险；R0 → 正常）
+--   8D 报告      ：从「质量监控」下钻到诊断页生成，定稿后即出现在「历史分析」
+-- 演示用 Excel：PPR/测试数据/ 与 PPR/测试数据/设备采集模拟数据/
+-- ---------------------------------------------------------------------------

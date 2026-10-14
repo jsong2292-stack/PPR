@@ -295,7 +295,7 @@ export function DiagnosisClient() {
 
     {/* 生成分析移到数据展示之后：先读完限值对照与趋势图，再选择模式生成，结论紧随其后，保证阅读连贯。 */}
     <Card className="mb-5 border-slate-200 shadow-sm">
-      <CardHeader className="border-b border-slate-100 pb-3"><div><CardTitle className="text-base">生成诊断分析</CardTitle><p className="mt-1 text-xs text-slate-500">基于上方限值对照、批次尺寸趋势与设备工艺数据整理结论；生成过程与结论在下方展示。</p></div></CardHeader>
+      <CardHeader className="border-b border-slate-100 pb-3"><div className="flex flex-wrap items-baseline gap-x-2 gap-y-1"><CardTitle className="text-base">生成诊断分析</CardTitle><p className="text-xs text-slate-500">基于上方限值对照、批次尺寸趋势与设备工艺数据整理结论；生成过程与结论在下方展示。</p></div></CardHeader>
       <CardContent className="flex flex-wrap items-center gap-3 p-4">
         <Select value={mode} onValueChange={(value) => setMode(value as AnalysisMode)}>
           <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>

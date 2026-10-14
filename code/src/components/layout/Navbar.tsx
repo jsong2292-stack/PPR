@@ -147,7 +147,8 @@ export default function Navbar() {
   return (
     <>
       <nav className="sticky top-0 z-50 border-b border-gray-200/50 bg-white/80 backdrop-blur-xl">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        {/* 通栏布局：左侧留白与 QualityShell 侧边栏保持同一栅格，保证 Logo 与边栏对齐且贴靠最左侧 */}
+        <div className="w-full px-3">
           <div className="flex h-14 items-center justify-between">
             {/* Logo */}
             <Link href="/" className="flex flex-shrink-0 items-center space-x-2">
@@ -162,48 +163,51 @@ export default function Navbar() {
               </div>
             </Link>
 
-            {/* 主导航 */}
-            <div className="flex min-w-0 flex-1 items-center justify-start pl-3 md:justify-center md:pl-8">
-              <div className="no-scrollbar flex w-full select-none items-center gap-4 overflow-x-auto overscroll-x-contain whitespace-nowrap md:w-auto md:gap-8 md:overflow-visible">
-                {navItems.map((item) => (
-                  <div key={`${item.label}-${item.href}`} className="group/nav relative shrink-0">
-                    <Link
-                      href={item.href}
-                      className="relative text-sm text-gray-600 transition-colors hover:text-gray-900"
-                    >
-                      {item.label}
-                      <span className="absolute -bottom-1 left-0 h-0.5 w-0 bg-gray-900 transition-all duration-300 group-hover/nav:w-full" />
-                    </Link>
+            {/* 主导航：本站业务入口已统一收敛到左侧业务边栏（QualityShell），
+                顶部仅作为品牌与账号区，因此 siteConfig.nav 清空后此处不再渲染菜单。 */}
+            {(navItems.length > 0 || siteConfig.enableQrDialog) && (
+              <div className="flex min-w-0 flex-1 items-center justify-start pl-3 md:justify-center md:pl-8">
+                <div className="no-scrollbar flex w-full select-none items-center gap-4 overflow-x-auto overscroll-x-contain whitespace-nowrap md:w-auto md:gap-8 md:overflow-visible">
+                  {navItems.map((item) => (
+                    <div key={`${item.label}-${item.href}`} className="group/nav relative shrink-0">
+                      <Link
+                        href={item.href}
+                        className="relative text-sm text-gray-600 transition-colors hover:text-gray-900"
+                      >
+                        {item.label}
+                        <span className="absolute -bottom-1 left-0 h-0.5 w-0 bg-gray-900 transition-all duration-300 group-hover/nav:w-full" />
+                      </Link>
 
-                    {item.children && item.children.length > 0 && (
-                      <div className="invisible absolute left-0 top-full z-50 -translate-y-1 pt-4 opacity-0 transition-all duration-200 ease-out group-hover/nav:visible group-hover/nav:translate-y-0 group-hover/nav:opacity-100">
-                        <div className="w-40 rounded-xl border border-gray-200/50 bg-white p-1 shadow-xl">
-                          {item.children.map((child) => (
-                            <Link
-                              key={child.href}
-                              href={child.href}
-                              className="block rounded-lg px-3 py-2.5 text-sm text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900"
-                            >
-                              {child.label}
-                            </Link>
-                          ))}
+                      {item.children && item.children.length > 0 && (
+                        <div className="invisible absolute left-0 top-full z-50 -translate-y-1 pt-4 opacity-0 transition-all duration-200 ease-out group-hover/nav:visible group-hover/nav:translate-y-0 group-hover/nav:opacity-100">
+                          <div className="w-40 rounded-xl border border-gray-200/50 bg-white p-1 shadow-xl">
+                            {item.children.map((child) => (
+                              <Link
+                                key={child.href}
+                                href={child.href}
+                                className="block rounded-lg px-3 py-2.5 text-sm text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900"
+                              >
+                                {child.label}
+                              </Link>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                      )}
+                    </div>
+                  ))}
 
-                {siteConfig.enableQrDialog && (
-                  <button
-                    type="button"
-                    onClick={() => setIsQrOpen(true)}
-                    className="relative shrink-0 text-sm text-gray-600 transition-colors hover:text-gray-900"
-                  >
-                    更多资讯
-                  </button>
-                )}
+                  {siteConfig.enableQrDialog && (
+                    <button
+                      type="button"
+                      onClick={() => setIsQrOpen(true)}
+                      className="relative shrink-0 text-sm text-gray-600 transition-colors hover:text-gray-900"
+                    >
+                      更多资讯
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* 右侧操作区 */}
             <div className="flex shrink-0 items-center space-x-1.5 sm:space-x-3">

@@ -8,12 +8,9 @@ export const siteConfig={
   description:process.env.NEXT_PUBLIC_SITE_DESCRIPTION||'面向PPR管材生产的质量数据管理、异常预警、智能诊断、工程师验证和8D闭环平台。',
   keywords:['PPR','质量管理','异常诊断','8D报告','日丰平台'],
   copyright:process.env.NEXT_PUBLIC_SITE_COPYRIGHT||'© PPR质量智能分析助手', owner:process.env.NEXT_PUBLIC_SITE_OWNER||'',
-  nav:[
-    {label:'质量工作台',href:'/quality/monitor'},
-    // 「异常诊断」不挂在顶部导航：诊断页由预警队列的「进入诊断」进入。
-    // 「8D报告」同理不挂导航：从诊断页生成/进入，或从历史分析列表点记录进入。
-    {label:'历史分析',href:'/quality/history'},
-  ] as NavItem[],
+  // 顶部导航已清空：业务入口统一收敛到 /quality 的左侧业务边栏（QualityShell），
+  // 顶部只保留品牌、搜索与账号区。如需恢复顶部菜单，在此补充配置即可。
+  nav: [] as NavItem[],
   footerColumns:[{title:'质量闭环',links:[{label:'监控与预警',href:'/quality/monitor'},{label:'异常诊断',href:'/quality/diagnosis'},{label:'历史分析',href:'/quality/history'}]},{title:'平台管理',links:[{label:'个人资料',href:'/user/profile'},{label:'用户管理',href:'/admin/users'},{label:'系统设置',href:'/admin/settings'}]}] as FooterColumn[],
   footerNote:'基于日丰通用平台脚手架构建；演示规则和阈值需在正式上线前完成现场校准。',
   enableQrDialog:false,qrImage:'/wechat-qrcode.png',qrTitle:'关注公众号',qrDescription:'扫码关注我们',

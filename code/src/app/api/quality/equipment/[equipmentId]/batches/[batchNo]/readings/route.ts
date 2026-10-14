@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query, queryAll, queryOne } from '@/storage/database/mysql-client';
 import { requireAdmin } from '@/lib/auth';
 import { fail, failFrom } from '@/lib/api';
+import {
+  cleanupEquipmentBatchReadings,
+  countEquipmentBatchReadings,
+  describeEquipmentReadingCleanup,
+} from '@/lib/quality-batch-cleanup';
 import { makeBusinessNo, normalizeValue } from '@/lib/quality';
 import { readingColumnsForType } from '@/lib/quality-equipment';
 import { hasAnyReadingValue, loadEquipmentWithType, pickReadingValues } from '@/lib/quality-equipment-server';
@@ -115,5 +120,48 @@ export async function POST(request: NextRequest, context: { params: Promise<{ eq
   } catch (cause) {
     console.error('equipment readings POST failed', cause);
     return failFrom(cause, '新增采集数据失败');
+  }
+}
+
+/**
+ * 清理这台设备在这个批次下的采集数据。
+ *
+ * 为什么不做「删除整个批次」：批次只是产品数据 + 设备数据按批次号聚合出来的视图，
+ * 两边没有从属关系。所以在设备页上删一行，只能删这台设备该批次的采集数据，
+ * 不能顺手把产品检验记录或别的设备的采集数据也删掉。
+ *
+ * 两次确认：不带 confirm=1 时只回报条数（409），前端确认后带 confirm=1 才真的删。
+ */
+export async function DELETE(request: NextRequest, context: { params: Promise<{ equipmentId: string; batchNo: string }> }) {
+  const denied = await adminGuard(); if (denied) return denied;
+  const { equipmentId, batchNo: rawBatchNo } = await context.params;
+  const equipmentIdNum = Number(equipmentId);
+  const batchNo = readBatchNo(rawBatchNo);
+  if (!equipmentIdNum || !batchNo) return fail('设备ID或批次号不正确');
+
+  try {
+    const equipment = await loadEquipmentWithType(equipmentIdNum);
+    if (!equipment) return fail('设备不存在', 404);
+
+    const confirmed = new URL(request.url).searchParams.get('confirm') === '1';
+    const count = await countEquipmentBatchReadings(equipmentIdNum, batchNo);
+    if (count === 0) return fail(`「${equipment.name}」在批次「${batchNo}」下没有采集数据`, 404);
+    if (!confirmed) {
+      return NextResponse.json({
+        error: describeEquipmentReadingCleanup(equipment.name, batchNo, count),
+        code: 'READINGS_HAS_ROWS',
+        count,
+      }, { status: 409 });
+    }
+
+    const deleted = await cleanupEquipmentBatchReadings(equipmentIdNum, batchNo);
+    return NextResponse.json({
+      success: true,
+      deleted,
+      message: `已清理「${equipment.name}」在批次「${batchNo}」下的 ${deleted} 条采集数据；产品检验记录与其他设备的采集数据不受影响。`,
+    });
+  } catch (cause) {
+    console.error('equipment readings DELETE failed', cause);
+    return failFrom(cause, '清理采集数据失败');
   }
 }

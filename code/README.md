@@ -200,9 +200,9 @@ docker compose up -d --build
 
 | API | 方法 | 说明 |
 |---|---|---|
-| `/api/quality/master/[resource]` | GET/POST/PUT/DELETE | 7 类主数据和数据源通用 CRUD；`batches?spec_id=`、`measurements?batch_no=` 用于产品台账下钻收窄。批次（`batches`）是只读视图：批量 POST/PUT 直接返回「不能手工新建或编辑」，删除走 `DELETE ?id=<批次号>&cascade=1` 按批次号级联清理 |
+| `/api/quality/master/[resource]` | GET/POST/PUT/DELETE | 7 类主数据和数据源通用 CRUD；`batches?spec_id=`、`measurements?batch_no=` 用于产品台账下钻收窄。批次（`batches`）是只读视图：批量 POST/PUT 直接返回「不能手工新建或编辑」；删除是**按来源清理**，`DELETE /api/quality/master/batches?id=<批次号>` 只清理该批次的检验记录（连带预警事件），需先探测再带 `confirm=1` 执行；设备侧采集数据走 `DELETE /api/quality/equipment/{设备ID}/batches/{批次号}/readings` |
 | `/api/quality/equipment/[equipmentId]/batches` | GET | 该设备的批次列表，以及「导入采集数据」可选的候选批次号（批次由产品数据导入自动产生，不能手工新建） |
-| `/api/quality/equipment/[equipmentId]/batches/[batchNo]/readings` | GET/POST | 该批次号的采集项列表 / 按批次号导入该设备的采集数据（先选批次号再上传文件，幂等覆盖） |
+| `/api/quality/equipment/[equipmentId]/batches/[batchNo]/readings` | GET/POST/DELETE | 该批次号的采集项列表 / 按批次号导入该设备的采集数据（先选批次号再上传文件，幂等覆盖）/ 只清理本设备该批次的采集数据（带 `confirm=1` 执行，不牵连产品数据与其他设备） |
 | `/api/quality/products/[specId]` | GET | 产品台账下钻的面包屑上下文；带 `?batch_no=`（值为批次号字符串）时一并返回批次 |
 | `/api/quality/dashboard` | GET | 监控统计、趋势、预警和产品数据 |
 | `/api/quality/alerts/evaluate` | POST | 按规格演示限值重新扫描产品数据 |

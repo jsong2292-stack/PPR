@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { type ReadingFieldMeta } from '@/lib/quality-equipment';
 import { describeImport, importRows } from '@/lib/quality-import-client';
 import { useConfirmDialog } from '@/components/common/use-confirm-dialog';
-import { deleteQualityRecord } from '@/lib/quality-delete';
+import { cleanupEquipmentBatchReadings } from '@/lib/quality-delete';
 import { PageHeader } from './PageHeader';
 
 type Row = Record<string, unknown>;
@@ -139,16 +139,14 @@ export function EquipmentBatches({ equipmentId }: { equipmentId: number }) {
   };
 
   /**
-   * 批次清理：批次是视图，删除 = 把这个批次号下的检验记录与采集数据一起清掉，
-   * 所以这里删的是整个批次（两个台账共用），确认文案必须写清楚。
+   * 采集数据清理：设备页的每一行只代表「本设备在这个批次下的采集数据」，
+   * 批次本身只是按批次号聚合出来的视图，产品侧与设备侧没有从属关系，
+   * 所以这里只清理这一台设备的数据 —— 产品检验记录、同批次下其他设备的采集数据都不受影响。
    */
   const remove = async (row: Row) => {
     const no = String(row.batch_no ?? '');
-    const outcome = await deleteQualityRecord(confirm, 'batches', no, {
-      title: '清理批次',
-      description: `将删除批次「${no}」下的全部检验记录与设备采集数据（含预警事件）。批次号下没有数据后，批次总览里也就没有它了。`,
-    });
-    if (outcome.status === 'deleted') { toast.success('批次数据已清理'); await load(); }
+    const outcome = await cleanupEquipmentBatchReadings(confirm, equipmentId, no);
+    if (outcome.status === 'deleted') { toast.success(outcome.message ?? '采集数据已清理'); await load(); }
     else if (outcome.status === 'failed') toast.error(outcome.error);
   };
 
@@ -208,7 +206,7 @@ export function EquipmentBatches({ equipmentId }: { equipmentId: number }) {
                     <Button variant="ghost" size="sm" asChild className="text-blue-700">
                       <Link href={`/quality/data/equipment/${equipmentId}/${encodeURIComponent(String(row.batch_no ?? ''))}`}>采集数据<ChevronRight size={15} /></Link>
                     </Button>
-                    <Button variant="ghost" size="icon" className="text-red-600" onClick={() => { void remove(row); }}><Trash2 size={15} /></Button>
+                    <Button variant="ghost" size="icon" className="text-red-600" title="清理本设备该批次的采集数据（不影响产品检验记录与其他设备）" aria-label="清理本设备该批次的采集数据" onClick={() => { void remove(row); }}><Trash2 size={15} /></Button>
                   </TableCell>
                 </TableRow>
               )) : <TableRow><TableCell colSpan={7} className="h-32 text-center text-slate-500">

@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useConfirmDialog } from '@/components/common/use-confirm-dialog';
 import { describeImport, importRows, importTargetFor } from '@/lib/quality-import-client';
-import { deleteQualityRecord } from '@/lib/quality-delete';
+import { cleanupBatchMeasurements, deleteQualityRecord } from '@/lib/quality-delete';
 import { PageHeader } from './PageHeader';
 
 export type Field = { key: string; label: string; type?: 'text'|'number'|'datetime'|'textarea'|'select'; required?: boolean; options?: { label: string; value: string }[]; optionResource?: string; optionLabel?: string };
@@ -77,18 +77,15 @@ export function DataManager({ resource, title, description, fields, columns, exc
     } catch (error) { toast.error(error instanceof Error ? error.message : '保存失败'); } finally { setSaving(false); }
   };
   const remove = async (row: Record<string, unknown>) => {
-    // 批次不是主数据：删除 = 按批次号把检验记录 / 采集数据一起清掉，所以文案说「清理」而不是「删除记录」。
-    // 先普通删除，服务端返回 409 后带着关联条数二次确认（见 lib/quality-delete.ts）。
-    const firstConfirm = resource === 'batches'
-      ? {
-        title: '清理批次',
-        description: `将清理批次「${String(row.batch_no ?? row.id ?? '')}」下的全部检验记录与设备采集数据（含预警事件）。批次号下没有数据后，批次总览里也就没有它了。`,
-      }
-      : { title: '删除记录', description: '确认删除该记录？存在关联数据时系统会拒绝删除。' };
-    const outcome = await deleteQualityRecord(confirm, resource, row.id, firstConfirm);
+    // 批次不是主数据、两边也没有从属关系：批次总览的行只清理【产品侧】的检验记录，
+    // 设备采集数据要到设备台账里按设备单独清理（见 lib/quality-delete.ts）。
+    // 清理条数由服务端探测后给出，用户看到的是真实数字。
+    const outcome = resource === 'batches'
+      ? await cleanupBatchMeasurements(confirm, String(row.batch_no ?? row.id ?? ''))
+      : await deleteQualityRecord(confirm, resource, row.id, { title: '删除记录', description: '确认删除该记录？存在关联数据时系统会拒绝删除。' });
     if (outcome.status === 'cancelled') return;
     if (outcome.status === 'failed') return toast.error(outcome.error);
-    toast.success(resource === 'batches' ? '批次数据已清理' : '数据已删除');
+    toast.success(outcome.message ?? (resource === 'batches' ? '检验记录已清理' : '数据已删除'));
     load();
   };
   /**
@@ -136,7 +133,7 @@ export function DataManager({ resource, title, description, fields, columns, exc
         <div className="flex items-center gap-3 text-sm text-slate-500"><FileSpreadsheet size={16}/>共 {visible.length} 条<Button variant="ghost" size="icon" onClick={load}><RefreshCw size={16}/></Button></div>
       </div>
       <CardContent className="p-4"><Table><TableHeader><TableRow>{columns.map((column) => <TableHead key={column.key} className="whitespace-nowrap">{column.label}</TableHead>)}{showActions && <TableHead className="sticky right-0 bg-muted text-right">操作</TableHead>}</TableRow></TableHeader>
-      <TableBody>{loading ? <TableRow><TableCell colSpan={columns.length + (showActions ? 1 : 0)} className="h-32 text-center"><Loader2 className="mx-auto animate-spin text-blue-600"/></TableCell></TableRow> : visible.length ? visible.map((row) => <TableRow key={String(row.id)}>{columns.map((column) => <TableCell key={column.key} className="max-w-[280px] whitespace-nowrap">{column.render ? column.render(row) : displayCell(column.key, row[column.key])}</TableCell>)}{showActions && <TableCell className="sticky right-0 whitespace-nowrap bg-white text-right">{detail && <Button variant="ghost" size="sm" asChild className="text-blue-700"><Link href={detail.href(row)}><Activity size={15}/>{detail.label}</Link></Button>}{canEdit && <Button variant="ghost" size="icon" onClick={() => showEditor(row)}><Pencil size={15}/></Button>}{removable && <Button variant="ghost" size="icon" className="text-red-600" onClick={() => remove(row)}><Trash2 size={15}/></Button>}</TableCell>}</TableRow>) : <TableRow><TableCell colSpan={columns.length + (showActions ? 1 : 0)} className="h-32 text-center text-slate-500">暂无数据</TableCell></TableRow>}</TableBody></Table></CardContent></Card>
+      <TableBody>{loading ? <TableRow><TableCell colSpan={columns.length + (showActions ? 1 : 0)} className="h-32 text-center"><Loader2 className="mx-auto animate-spin text-blue-600"/></TableCell></TableRow> : visible.length ? visible.map((row) => <TableRow key={String(row.id)}>{columns.map((column) => <TableCell key={column.key} className="max-w-[280px] whitespace-nowrap">{column.render ? column.render(row) : displayCell(column.key, row[column.key])}</TableCell>)}{showActions && <TableCell className="sticky right-0 whitespace-nowrap bg-white text-right">{detail && <Button variant="ghost" size="sm" asChild className="text-blue-700"><Link href={detail.href(row)}><Activity size={15}/>{detail.label}</Link></Button>}{canEdit && <Button variant="ghost" size="icon" onClick={() => showEditor(row)}><Pencil size={15}/></Button>}{removable && <Button variant="ghost" size="icon" className="text-red-600" title={resource === 'batches' ? '清理该批次的检验记录（不影响设备采集数据）' : '删除该记录'} aria-label={resource === 'batches' ? '清理该批次的检验记录' : '删除该记录'} onClick={() => remove(row)}><Trash2 size={15}/></Button>}</TableCell>}</TableRow>) : <TableRow><TableCell colSpan={columns.length + (showActions ? 1 : 0)} className="h-32 text-center text-slate-500">暂无数据</TableCell></TableRow>}</TableBody></Table></CardContent></Card>
     <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl"><DialogHeader><DialogTitle>{editing ? '编辑' : '新增'}{entityLabel ?? title}</DialogTitle><DialogDescription>保存后写入 MySQL，监控、诊断和报告将读取同一份数据。</DialogDescription></DialogHeader>
       <div className="grid gap-4 py-2 sm:grid-cols-2">{formFields.map((field) => <div key={field.key} className={field.type === 'textarea' ? 'sm:col-span-2' : ''}><Label className="mb-2 block">{field.label}{field.required && <span className="text-red-500"> *</span>}</Label>{field.type === 'select' ? <Select value={String(form[field.key] ?? '')} onValueChange={(value) => setForm((state) => ({ ...state, [field.key]: value }))}><SelectTrigger className="w-full"><SelectValue placeholder="请选择" /></SelectTrigger><SelectContent>{(field.options || options[field.optionResource || ''] || []).map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select> : field.type === 'textarea' ? <textarea className="min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm" value={String(form[field.key] ?? '')} onChange={(event) => setForm((state) => ({ ...state, [field.key]: event.target.value }))}/> : <Input type={field.type === 'number' ? 'number' : field.type === 'datetime' ? 'datetime-local' : 'text'} step={field.type === 'number' ? '0.001' : undefined} value={String(form[field.key] ?? '')} onChange={(event) => setForm((state) => ({ ...state, [field.key]: event.target.value }))}/>}</div>)}</div>
       <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>取消</Button><Button onClick={save} disabled={saving} className="bg-blue-700 hover:bg-blue-800">{saving && <Loader2 className="animate-spin" size={16}/>}保存到数据库</Button></DialogFooter>

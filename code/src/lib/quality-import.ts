@@ -79,7 +79,7 @@ async function assertBatchSpecUnchanged(batchNo: string, specId: number, specNam
   if (existing && Number(existing.spec_id) !== specId) {
     throw new Error(
       `批次「${batchNo}」已经属于产品规格「${existing.spec_name}」，本次要写入的是「${specName}」：`
-      + '同一个批次号只能对应一个产品规格。请先在批次总览里清理这个批次（会连同检验记录与采集数据一起删掉），或者改用正确的批次号 / 规格编码。'
+      + '同一个批次号只能对应一个产品规格。请先在批次总览里清理这个批次的检验记录（只影响产品侧，设备采集数据需要的话到设备台账里单独清理），或者改用正确的批次号 / 规格编码。'
     );
   }
 }

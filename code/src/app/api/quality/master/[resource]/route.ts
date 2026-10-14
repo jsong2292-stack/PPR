@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isMasterResource, normalizeValue, RESOURCE_CONFIG, dbClient } from '@/lib/quality';
 import { refreshAlertsQuietly, type AlertEvaluationSummary } from '@/lib/quality-analysis/alert-engine';
 import { resolveMeasurementBatch } from '@/lib/quality-import';
-import { cascadeDeleteBatch, describeBatchDependents, hasBatchDependents, loadBatchDependents } from '@/lib/quality-batch-delete';
+import {
+  cleanupBatchMeasurements,
+  describeArchivedReports,
+  describeMeasurementCleanup,
+  loadMeasurementCleanup,
+} from '@/lib/quality-batch-cleanup';
 import { requireAdmin } from '@/lib/auth';
 import { failFrom } from '@/lib/api';
 
@@ -141,17 +146,22 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   const rawId = searchParams.get('id') ?? '';
   const id = Number(rawId);
   if (!rawId.trim() || (resource !== 'batches' && !id)) return error('缺少记录ID');
-  // 批次清理会把检验记录与采集数据一并清掉，必须由前端二次确认后显式带上 cascade=1。
-  const cascade = searchParams.get('cascade') === '1';
+  // 批次不落表，这里的「批次 id」就是批次号，删除 = 清理该批次的检验记录（产品侧），
+  // 不碰设备采集数据（那是设备台账里按设备清理的）。必须由前端二次确认后显式带上 confirm=1。
+  const confirmed = searchParams.get('confirm') === '1';
   try {
-    // 删除产品数据后该批次的「连续点」判定可能变化，需要按批次重算。
     if (resource === 'batches') {
-      const blocked = await guardBatchDelete(rawId, cascade);
+      const blocked = await guardBatchMeasurementCleanup(rawId, confirmed);
       if (blocked) return blocked;
-      if (!cascade) return error(`批次「${rawId}」下没有可清理的数据`, 404);
-      await cascadeDeleteBatch(rawId);
-      // 数据已清空，该批次号在视图里随之消失，不需要再重算预警。
-      return NextResponse.json({ success: true, alerts: null });
+      if (!confirmed) return error(`批次「${rawId}」下没有检验记录`, 404);
+      const deleted = await cleanupBatchMeasurements(rawId);
+      // 只删数据，不新增数据，判定结果不会冒出新的预警，无需重算。
+      return NextResponse.json({
+        success: true,
+        alerts: null,
+        deleted,
+        message: `已清理 ${deleted.measurements} 条检验记录与 ${deleted.alerts} 条预警事件；该批次的设备采集数据不受影响。`,
+      });
     }
     const previous = await dbClient.queryOne(`SELECT * FROM ${config.table} WHERE id=?`, [id]);
     await dbClient.query(`DELETE FROM ${config.table} WHERE id=?`, [id]);
@@ -169,25 +179,26 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
 }
 
 /**
- * 批次清理前的关联数据检查。
- * 有归档 8D 报告 → 直接拒绝（归档表对报告是 RESTRICT，级联也删不掉）；
- * 有检验记录 / 采集数据但用户还没确认 → 返回 409 + 关联条数，前端据此弹二次确认。
+ * 清理批次检验记录前的检查。
+ * 有归档 8D 报告 → 直接拒绝（归档表对报告是 RESTRICT，确认了也删不掉）；
+ * 有检验记录但用户还没确认 → 返回 409 + 条数，前端据此弹二次确认。
+ *
+ * 这里只统计产品侧（检验记录及其预警事件）；设备采集数据不参与，也不受影响。
  */
-async function guardBatchDelete(batchNo: string, cascade: boolean): Promise<NextResponse | null> {
-  const dependents = await loadBatchDependents(batchNo);
-  const label = `批次「${batchNo}」`;
-  if (dependents.archivedReports.length) {
+async function guardBatchMeasurementCleanup(batchNo: string, confirmed: boolean): Promise<NextResponse | null> {
+  const cleanup = await loadMeasurementCleanup(batchNo);
+  if (cleanup.archivedReports.length) {
     return NextResponse.json({
-      error: `${label}下的检验记录已归档为 8D 报告（${dependents.archivedReports.join('、')}），为保证归档留痕不能删除。请先在历史归档中处理这些报告。`,
+      error: describeArchivedReports(cleanup),
       code: 'BATCH_HAS_ARCHIVED_REPORT',
-      dependents,
+      cleanup,
     }, { status: 409 });
   }
-  if (!cascade && hasBatchDependents(dependents)) {
+  if (!confirmed && cleanup.measurements > 0) {
     return NextResponse.json({
-      error: describeBatchDependents(dependents),
-      code: 'BATCH_HAS_DEPENDENTS',
-      dependents,
+      error: describeMeasurementCleanup(cleanup),
+      code: 'BATCH_HAS_MEASUREMENTS',
+      cleanup,
     }, { status: 409 });
   }
   return null;

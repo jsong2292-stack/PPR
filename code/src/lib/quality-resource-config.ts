@@ -46,13 +46,13 @@ export const QUALITY_RESOURCE_CONFIG: Record<string, ResourcePageConfig> = {
     columns: [{key:'code',label:'编码'},{key:'name',label:'名称'},{key:'category_name',label:'产品类别'},{key:'outer_upper_mm',label:'最大外径 mm'},{key:'outer_lower_mm',label:'最小外径 mm'},{key:'wall_upper_mm',label:'最大壁厚 mm'},{key:'wall_lower_mm',label:'最小壁厚 mm'},{key:'ovality_upper_mm',label:'不圆度上限 mm'},{key:'status',label:'状态'}],
   },
   'equipment-types': {
-    title: '设备类型', description: '维护挤出机、牵引机、在线测径仪等设备分类。',
+    title: '设备类型', description: '维护挤出机、牵引机等设备分类；采集项随设备类型变化。',
     excel: false,
     fields: [{key:'code',label:'类型编码',required:true},{key:'name',label:'类型名称',required:true},{key:'description',label:'说明',type:'textarea'},{key:'status',label:'状态',type:'select',options:statusOptions}],
     columns: [{key:'code',label:'编码'},{key:'name',label:'名称'},{key:'description',label:'说明'},{key:'status',label:'状态'}],
   },
   equipment: {
-    title: '设备台账', description: '维护生产设备、类型和所属产线，供批次及采集数据关联。',
+    title: '设备台账', description: '维护生产设备、类型和所属产线；点「采集数据」进入该设备的生产批次与采集项。',
     excel: false,
     fields: [{key:'code',label:'设备编码',required:true},{key:'name',label:'设备名称',required:true},{key:'type_id',label:'设备类型',type:'select',optionResource:'equipment-types',required:true},{key:'line_name',label:'产线/工段',required:true},{key:'status',label:'状态',type:'select',options:[...statusOptions,{label:'检修',value:'maintenance'}]},{key:'description',label:'说明',type:'textarea'}],
     columns: [{key:'code',label:'设备编码'},{key:'name',label:'设备名称'},{key:'type_name',label:'设备类型'},{key:'line_name',label:'产线/工段'},{key:'status',label:'状态'}],
@@ -71,12 +71,7 @@ export const QUALITY_RESOURCE_CONFIG: Record<string, ResourcePageConfig> = {
   measurements: {
     title: '产品数据', description: '维护QMS/检验产品记录；保存后系统自动按产品规格的标准区间重算预警事件，无需手工扫描。',
     fields: [{key:'record_no',label:'记录编号',required:true},{key:'sample_no',label:'样管编号',required:true},{key:'batch_id',label:'生产批次',type:'select',optionResource:'batches',required:true},{key:'inspect_time',label:'检验时间',type:'datetime',required:true},{key:'outer_diameter_mm',label:'外径 mm',type:'number'},{key:'min_wall_thickness_mm',label:'壁厚 mm',type:'number'},{key:'max_wall_thickness_mm',label:'最大壁厚 mm',type:'number'},{key:'max_outer_diameter_mm',label:'同截面最大外径 mm',type:'number'},{key:'min_outer_diameter_mm',label:'同截面最小外径 mm',type:'number'},{key:'ovality_mm',label:'不圆度 mm',type:'number'},{key:'data_source',label:'数据来源'},{key:'quality_flag',label:'质量标记',type:'select',options:qualityFlags},{key:'remark',label:'备注',type:'textarea'}],
-    columns: [{key:'record_no',label:'记录编号'},{key:'batch_no',label:'批次号'},{key:'sample_no',label:'样管'},{key:'inspect_time',label:'检验时间'},{key:'outer_diameter_mm',label:'外径 mm'},{key:'min_wall_thickness_mm',label:'壁厚 mm'},{key:'ovality_mm',label:'不圆度 mm'},{key:'data_source',label:'来源'},{key:'quality_flag',label:'标记'}],
-  },
-  readings: {
-    title: '设备采集数据', description: '维护同批次设备时序数据，诊断时按批次和时间自动关联。',
-    fields: [{key:'record_no',label:'记录编号',required:true},{key:'batch_id',label:'生产批次',type:'select',optionResource:'batches',required:true},{key:'equipment_id',label:'设备',type:'select',optionResource:'equipment',required:true},{key:'collect_time',label:'采集时间',type:'datetime',required:true},{key:'temperature_c',label:'温度 ℃',type:'number'},{key:'pressure_mpa',label:'压力 MPa',type:'number'},{key:'haul_off_speed_mpm',label:'牵引速度 m/min',type:'number'},{key:'data_source',label:'数据来源',required:true},{key:'remark',label:'备注',type:'textarea'}],
-    columns: [{key:'record_no',label:'记录编号'},{key:'batch_no',label:'批次号'},{key:'equipment_name',label:'设备'},{key:'collect_time',label:'采集时间'},{key:'temperature_c',label:'温度 ℃'},{key:'pressure_mpa',label:'压力 MPa'},{key:'haul_off_speed_mpm',label:'牵引速度 m/min'},{key:'data_source',label:'来源'}],
+    columns: [{key:'batch_no',label:'批次号'},{key:'spec_name',label:'产品名称'},{key:'category_name',label:'产品类别'},{key:'inspect_time',label:'检验时间'},{key:'outer_diameter_mm',label:'外径 mm'},{key:'min_wall_thickness_mm',label:'壁厚 mm'},{key:'ovality_mm',label:'不圆度 mm'}],
   },
 };
 

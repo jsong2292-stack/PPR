@@ -18,7 +18,7 @@ const riskLabels: Record<string,string> = { normal:'正常', medium:'中风险',
 const statusLabels: Record<string,string> = { open:'待分析', analyzing:'分析中', closed:'已关闭' };
 
 export function MonitorClient() {
-  const [data, setData] = useState<{ alerts: Row[]; measurements: Row[]; readings: Row[]; stats: Row }>({ alerts:[], measurements:[], readings:[], stats:{} });
+  const [data, setData] = useState<{ alerts: Row[]; measurements: Row[]; stats: Row }>({ alerts:[], measurements:[], stats:{} });
   const [loading,setLoading]=useState(true); const [scanning,setScanning]=useState(false); const [alertTab,setAlertTab]=useState('abnormal');
   const load=useCallback(async()=>{setLoading(true);try{const res=await fetch('/api/quality/dashboard');const json=await res.json();if(!res.ok)throw new Error(json.error);setData(json);}catch(e){toast.error(e instanceof Error?e.message:'加载失败')}finally{setLoading(false)}},[]);
   useEffect(()=>{load()},[load]);

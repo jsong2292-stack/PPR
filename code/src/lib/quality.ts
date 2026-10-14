@@ -7,8 +7,7 @@ export type MasterResource =
   | 'equipment'
   | 'batches'
   | 'metrics'
-  | 'measurements'
-  | 'readings';
+  | 'measurements';
 
 export interface ResourceConfig {
   table: string;
@@ -76,18 +75,11 @@ export const RESOURCE_CONFIG: Record<MasterResource, ResourceConfig> = {
     // batch_id 不在这里：Excel 导入可以用 batch_no 代替，由 resolveMeasurementBatch 统一解析。
     required: ['record_no', 'sample_no', 'inspect_time'],
     orderBy: 'm.inspect_time DESC',
-    listSql: `SELECT m.*, b.batch_no, s.name AS spec_name FROM ppr_product_measurement m
+    // 列表额外带出产品名称（规格名）与产品类别（规格所属类别），二者都来自批次关联的规格，不是本表字段。
+    listSql: `SELECT m.*, b.batch_no, s.name AS spec_name, c.name AS category_name FROM ppr_product_measurement m
       JOIN ppr_batch b ON b.id=m.batch_id JOIN ppr_product_spec s ON s.id=b.spec_id
+      JOIN ppr_product_category c ON c.id=s.category_id
       ORDER BY m.inspect_time DESC`,
-  },
-  readings: {
-    table: 'ppr_equipment_reading',
-    columns: ['record_no', 'batch_id', 'equipment_id', 'collect_time', 'temperature_c', 'pressure_mpa', 'haul_off_speed_mpm', 'data_source', 'remark'],
-    required: ['record_no', 'batch_id', 'equipment_id', 'collect_time'],
-    orderBy: 'r.collect_time DESC',
-    listSql: `SELECT r.*, b.batch_no, e.name AS equipment_name FROM ppr_equipment_reading r
-      JOIN ppr_batch b ON b.id=r.batch_id JOIN ppr_equipment e ON e.id=r.equipment_id
-      ORDER BY r.collect_time DESC`,
   },
 };
 

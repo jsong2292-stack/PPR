@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
-  Activity, Boxes, ClipboardCheck, Database, Factory, Gauge, ListChecks, PackageSearch,
+  Boxes, ClipboardCheck, Database, Factory, Gauge, ListChecks, PackageSearch,
   Settings2, Wrench,
 } from 'lucide-react';
 
@@ -35,12 +35,11 @@ export const ADMIN_MENU_GROUPS: AdminMenuGroup[] = [
   {
     key: 'datasource',
     label: '数据源管理',
-    description: '维护批次基础信息以及产品数据与设备采集数据。',
+    description: '维护批次基础信息与产品数据；设备采集数据在「设备台账」里按设备、批次逐级查看。',
     icon: Database,
     items: [
       { label: '批次基础信息', href: '/quality/data/batches', icon: ListChecks },
       { label: '产品数据', href: '/quality/data/measurements', icon: ClipboardCheck },
-      { label: '设备采集数据', href: '/quality/data/readings', icon: Activity },
     ],
   },
 ];

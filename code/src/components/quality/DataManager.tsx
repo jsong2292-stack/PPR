@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Download, FileSpreadsheet, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, Upload } from 'lucide-react';
+import Link from 'next/link';
+import { Activity, Download, FileSpreadsheet, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -16,6 +17,8 @@ export type Field = { key: string; label: string; type?: 'text'|'number'|'dateti
 export type Column = { key: string; label: string; render?: (row: Record<string, unknown>) => React.ReactNode };
 /** 只出现在 Excel 模板里、不出现在页面表单上的列（例如产品数据的「批次号」）。replaces 指向它替代的表单字段，该字段不进模板。 */
 export type TemplateColumn = { key: string; label: string; note?: string; required?: boolean; replaces?: string };
+/** 行级下钻入口（例如设备台账 → 该设备的采集数据），渲染在操作列最前面。 */
+export type DetailLink = { label: string; href: (row: Record<string, unknown>) => string };
 
 function displayCell(key: string, value: unknown) {
   if (value == null || value === '') return '—';
@@ -23,7 +26,7 @@ function displayCell(key: string, value: unknown) {
   return String(value);
 }
 
-export function DataManager({ resource, title, description, fields, columns, excel = true, templateColumns = [], templateNotes = [], templateSample }: { resource: string; title: string; description: string; fields: Field[]; columns: Column[]; excel?: boolean; templateColumns?: TemplateColumn[]; templateNotes?: string[]; templateSample?: Record<string, string | number> }) {
+export function DataManager({ resource, title, description, fields, columns, excel = true, templateColumns = [], templateNotes = [], templateSample, detail }: { resource: string; title: string; description: string; fields: Field[]; columns: Column[]; excel?: boolean; templateColumns?: TemplateColumn[]; templateNotes?: string[]; templateSample?: Record<string, string | number>; detail?: DetailLink }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
@@ -130,7 +133,7 @@ export function DataManager({ resource, title, description, fields, columns, exc
         <div className="flex items-center gap-3 text-sm text-slate-500"><FileSpreadsheet size={16}/>共 {visible.length} 条<Button variant="ghost" size="icon" onClick={load}><RefreshCw size={16}/></Button></div>
       </div>
       <CardContent className="p-4"><Table><TableHeader><TableRow>{columns.map((column) => <TableHead key={column.key} className="whitespace-nowrap">{column.label}</TableHead>)}<TableHead className="sticky right-0 bg-muted text-right">操作</TableHead></TableRow></TableHeader>
-      <TableBody>{loading ? <TableRow><TableCell colSpan={columns.length + 1} className="h-32 text-center"><Loader2 className="mx-auto animate-spin text-blue-600"/></TableCell></TableRow> : visible.length ? visible.map((row) => <TableRow key={String(row.id)}>{columns.map((column) => <TableCell key={column.key} className="max-w-[280px] whitespace-nowrap">{column.render ? column.render(row) : displayCell(column.key, row[column.key])}</TableCell>)}<TableCell className="sticky right-0 bg-white text-right"><Button variant="ghost" size="icon" onClick={() => showEditor(row)}><Pencil size={15}/></Button><Button variant="ghost" size="icon" className="text-red-600" onClick={() => remove(row)}><Trash2 size={15}/></Button></TableCell></TableRow>) : <TableRow><TableCell colSpan={columns.length + 1} className="h-32 text-center text-slate-500">暂无数据</TableCell></TableRow>}</TableBody></Table></CardContent></Card>
+      <TableBody>{loading ? <TableRow><TableCell colSpan={columns.length + 1} className="h-32 text-center"><Loader2 className="mx-auto animate-spin text-blue-600"/></TableCell></TableRow> : visible.length ? visible.map((row) => <TableRow key={String(row.id)}>{columns.map((column) => <TableCell key={column.key} className="max-w-[280px] whitespace-nowrap">{column.render ? column.render(row) : displayCell(column.key, row[column.key])}</TableCell>)}<TableCell className="sticky right-0 whitespace-nowrap bg-white text-right">{detail && <Button variant="ghost" size="sm" asChild className="text-blue-700"><Link href={detail.href(row)}><Activity size={15}/>{detail.label}</Link></Button>}<Button variant="ghost" size="icon" onClick={() => showEditor(row)}><Pencil size={15}/></Button><Button variant="ghost" size="icon" className="text-red-600" onClick={() => remove(row)}><Trash2 size={15}/></Button></TableCell></TableRow>) : <TableRow><TableCell colSpan={columns.length + 1} className="h-32 text-center text-slate-500">暂无数据</TableCell></TableRow>}</TableBody></Table></CardContent></Card>
     <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl"><DialogHeader><DialogTitle>{editing ? '编辑' : '新增'}{title}</DialogTitle><DialogDescription>保存后写入 MySQL，监控、诊断和报告将读取同一份数据。</DialogDescription></DialogHeader>
       <div className="grid gap-4 py-2 sm:grid-cols-2">{fields.map((field) => <div key={field.key} className={field.type === 'textarea' ? 'sm:col-span-2' : ''}><Label className="mb-2 block">{field.label}{field.required && <span className="text-red-500"> *</span>}</Label>{field.type === 'select' ? <Select value={String(form[field.key] ?? '')} onValueChange={(value) => setForm((state) => ({ ...state, [field.key]: value }))}><SelectTrigger className="w-full"><SelectValue placeholder="请选择" /></SelectTrigger><SelectContent>{(field.options || options[field.optionResource || ''] || []).map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select> : field.type === 'textarea' ? <textarea className="min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm" value={String(form[field.key] ?? '')} onChange={(event) => setForm((state) => ({ ...state, [field.key]: event.target.value }))}/> : <Input type={field.type === 'number' ? 'number' : field.type === 'datetime' ? 'datetime-local' : 'text'} step={field.type === 'number' ? '0.001' : undefined} value={String(form[field.key] ?? '')} onChange={(event) => setForm((state) => ({ ...state, [field.key]: event.target.value }))}/>}</div>)}</div>
       <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>取消</Button><Button onClick={save} disabled={saving} className="bg-blue-700 hover:bg-blue-800">{saving && <Loader2 className="animate-spin" size={16}/>}保存到数据库</Button></DialogFooter>

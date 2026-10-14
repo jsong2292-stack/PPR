@@ -18,7 +18,8 @@
 ### PPR 质量业务
 
 - **系统管理**：产品类别、产品规格、设备类型、设备台账
-- **数据源管理**：批次基础信息、质量指标与影响因素、产品检验数据、设备采集数据
+- **数据源管理**：批次基础信息、质量指标与影响因素、产品检验数据
+- **设备采集数据**：合并进设备台账，按「设备 → 生产批次 → 采集项」三级下钻；采集项随设备类型变化（挤出机=温度/压力，牵引机=牵引速度），并在批次内提供专用 Excel 模板导入
 - **数据维护**：列表检索、新增、编辑、删除、CSV 模板下载、Excel/CSV 批量导入
 - **监控预警**：质量指标趋势、规格演示限值、预警队列、产品数据重新扫描
 - **双模式异常诊断**：可选择确定性规则引擎或 LangChain Agent，并支持运行时配置切换
@@ -181,11 +182,12 @@ docker compose up -d --build
 | `/quality/data/categories` | 产品类别 |
 | `/quality/data/specs` | 产品规格 |
 | `/quality/data/equipment-types` | 设备类型 |
-| `/quality/data/equipment` | 设备台账 |
+| `/quality/data/equipment` | 设备台账（设备列表） |
+| `/quality/data/equipment/[equipmentId]` | 该设备的生产批次列表 |
+| `/quality/data/equipment/[equipmentId]/[batchId]` | 该批次下的设备采集项 |
 | `/quality/data/batches` | 批次基础信息 |
 | `/quality/data/metrics` | 质量指标与影响因素 |
 | `/quality/data/measurements` | 产品检验数据 |
-| `/quality/data/readings` | 设备采集数据 |
 | `/admin` | 平台管理后台 |
 
 ## 业务 API
@@ -194,8 +196,11 @@ docker compose up -d --build
 
 | API | 方法 | 说明 |
 |---|---|---|
-| `/api/quality/master/[resource]` | GET/POST/PUT/DELETE | 8 类主数据和数据源通用 CRUD |
-| `/api/quality/dashboard` | GET | 监控统计、趋势、预警、产品和设备数据 |
+| `/api/quality/master/[resource]` | GET/POST/PUT/DELETE | 7 类主数据和数据源通用 CRUD |
+| `/api/quality/equipment/[equipmentId]/batches` | GET/POST | 该设备的生产批次列表 / 在设备下新增批次 |
+| `/api/quality/equipment/[equipmentId]/batches/[batchId]/readings` | GET/POST | 该批次的采集项列表 / 新增采集项（记录编号自动生成） |
+| `/api/quality/equipment/[equipmentId]/batches/[batchId]/readings/[readingId]` | PUT/DELETE | 编辑 / 删除单条采集项 |
+| `/api/quality/dashboard` | GET | 监控统计、趋势、预警和产品数据 |
 | `/api/quality/alerts/evaluate` | POST | 按规格演示限值重新扫描产品数据 |
 | `/api/quality/analysis` | GET/POST/PUT | 按规则或Agent模式生成分析、保存工程师验证 |
 | `/api/quality/agent/status` | GET | 查询当前模式、模型、密钥配置和降级策略 |
@@ -204,8 +209,8 @@ docker compose up -d --build
 
 ## 数据流说明
 
-1. 在系统管理中维护产品、规格、设备。
-2. 在数据源管理中维护批次、产品检验和设备采集记录。
+1. 在系统管理中维护产品、规格、设备（设备类型只保留挤出机与牵引机）。
+2. 在数据源管理中维护批次与产品检验记录；设备采集数据在「设备台账」里按「设备 → 生产批次 → 采集项」逐级维护，批次内可用专用模板批量导入。
 3. 监控页读取同一数据库中的产品数据；点击“重新扫描”可为新增超限记录创建预警。
 4. 诊断页以 `alert_id` 为入口：规则模式直接执行确定性查询；Agent模式由 LangChain `createAgent` 自主选择白名单工具，并以 Zod Schema 输出结构化分析。
 5. 工程师逐条确认或驳回结论，验证结果实时写入 `ppr_analysis_conclusion`。
@@ -221,6 +226,7 @@ src/
 ├── components/quality/              # 业务组件
 ├── components/ui/                   # 平台 shadcn/ui 组件
 ├── lib/quality.ts                   # 资源白名单、业务公共方法
+├── lib/quality-equipment.ts         # 设备类型 → 批次关联字段 / 采集项（页面列与模板列共用）
 ├── lib/quality-analysis/            # 规则引擎、LangChain Agent、工具与双模式编排
 ├── lib/auth.ts                      # 平台认证
 └── storage/database/mysql-client.ts # MySQL 连接池与事务
@@ -228,6 +234,7 @@ scripts/
 ├── init-db.sql                      # 平台 + 业务 DDL、种子数据
 ├── init-db.js                       # 初始化入口
 ├── reset-db.sql                     # 开发环境重置
+├── generate-reading-demo.js         # 生成设备采集数据的模拟导入 Excel
 └── cdp-shot.mjs                     # 本地页面截图验收工具
 ```
 

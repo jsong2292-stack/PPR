@@ -365,8 +365,9 @@ CREATE TABLE IF NOT EXISTS ppr_equipment_reading (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (id),
   UNIQUE KEY uk_ppr_equipment_reading_no (record_no),
+  -- 同一设备 + 同一批次 + 同一采集时刻只能有一条记录，防止批次内 Excel 重复导入。
+  UNIQUE KEY uk_ppr_equipment_reading_equipment_batch_time (equipment_id, batch_id, collect_time),
   KEY idx_ppr_equipment_reading_batch_time (batch_id, collect_time),
-  KEY idx_ppr_equipment_reading_equipment (equipment_id),
   CONSTRAINT fk_ppr_reading_batch FOREIGN KEY (batch_id) REFERENCES ppr_batch(id) ON DELETE RESTRICT,
   CONSTRAINT fk_ppr_reading_equipment FOREIGN KEY (equipment_id) REFERENCES ppr_equipment(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PPR设备工艺参数采集数据';
@@ -509,15 +510,13 @@ INSERT INTO ppr_product_spec (id, code, name, category_id, outer_diameter_mm, wa
 ON DUPLICATE KEY UPDATE name=VALUES(name), category_id=VALUES(category_id), status=VALUES(status);
 
 INSERT INTO ppr_equipment_type (id, code, name, description, status) VALUES
-  (1, 'ETYPE-EXTRUDER', '挤出机', '负责塑化与挤出成型', 'enabled'),
-  (2, 'ETYPE-HAULOFF', '牵引机', '负责稳定牵引速度', 'enabled'),
-  (3, 'ETYPE-GAUGE', '在线测径仪', '在线采集外径数据', 'enabled')
+  (1, 'ETYPE-EXTRUDER', '挤出机', '负责塑化与挤出成型，采集温度与压力', 'enabled'),
+  (2, 'ETYPE-HAULOFF', '牵引机', '负责稳定牵引速度，采集牵引速度', 'enabled')
 ON DUPLICATE KEY UPDATE name=VALUES(name), description=VALUES(description), status=VALUES(status);
 
 INSERT INTO ppr_equipment (id, code, name, type_id, line_name, status, description) VALUES
   (1, 'EQ-EX-01', '1号挤出机', 1, '演示线 A', 'enabled', 'PPR管材主挤出设备'),
-  (2, 'EQ-HA-01', '1号牵引机', 2, '演示线 A', 'enabled', 'PPR管材牵引设备'),
-  (3, 'EQ-GA-01', '1号在线测径仪', 3, '演示线 A', 'enabled', '演示在线测径设备')
+  (2, 'EQ-HA-01', '1号牵引机', 2, '演示线 A', 'enabled', 'PPR管材牵引设备')
 ON DUPLICATE KEY UPDATE name=VALUES(name), type_id=VALUES(type_id), line_name=VALUES(line_name), status=VALUES(status);
 
 INSERT INTO ppr_batch (id, batch_no, spec_id, extruder_id, haul_off_id, production_group, start_time, end_time, status, data_source) VALUES
@@ -552,16 +551,9 @@ INSERT INTO ppr_product_measurement (id, record_no, sample_no, batch_id, inspect
   (16, 'IR-20261012-009', 'S-209', 4, '2026-10-12 20:00:00', 25.180, 4.310, 4.420, 25.280, 25.090, 0.190, 'MES_IMPORT', 'error', '记录值疑似跨规格录入')
 ON DUPLICATE KEY UPDATE sample_no=VALUES(sample_no), batch_id=VALUES(batch_id), inspect_time=VALUES(inspect_time), outer_diameter_mm=VALUES(outer_diameter_mm), min_wall_thickness_mm=VALUES(min_wall_thickness_mm), ovality_mm=VALUES(ovality_mm), quality_flag=VALUES(quality_flag), remark=VALUES(remark);
 
-INSERT INTO ppr_equipment_reading (id, record_no, batch_id, equipment_id, collect_time, temperature_c, pressure_mpa, haul_off_speed_mpm, data_source, remark) VALUES
-  (1, 'ER-20261010-0800', 1, 1, '2026-10-10 08:00:00', 205.00, 12.600, 8.200, 'SCADA', '稳定运行'),
-  (2, 'ER-20261010-0900', 1, 1, '2026-10-10 09:00:00', 205.50, 12.400, 8.300, 'SCADA', '压力轻微下降'),
-  (3, 'ER-20261010-1000', 1, 1, '2026-10-10 10:00:00', 206.00, 12.200, 8.450, 'SCADA', '牵引速度上升'),
-  (4, 'ER-20261011-0800', 2, 1, '2026-10-11 08:00:00', 205.00, 12.500, 8.200, 'SCADA', '稳定运行'),
-  (5, 'ER-20261011-0900', 2, 2, '2026-10-11 09:00:00', 204.80, 12.500, 8.550, 'SCADA', '牵引速度波动'),
-  (6, 'ER-20261012-0800', 3, 1, '2026-10-12 08:00:00', 205.20, 12.600, 8.200, 'SCADA', '参考批次'),
-  (7, 'ER-20261012-0900', 3, 2, '2026-10-12 09:00:00', 205.10, 12.500, 8.220, 'SCADA', '参考批次'),
-  (8, 'ER-20261012-2000', 4, 1, '2026-10-12 20:00:00', 203.00, 11.800, 7.900, 'SCADA', '换规格后首件')
-ON DUPLICATE KEY UPDATE batch_id=VALUES(batch_id), equipment_id=VALUES(equipment_id), collect_time=VALUES(collect_time), temperature_c=VALUES(temperature_c), pressure_mpa=VALUES(pressure_mpa), haul_off_speed_mpm=VALUES(haul_off_speed_mpm), remark=VALUES(remark);
+-- 设备采集数据不预置演示数据：
+-- 采集数据现在挂在「设备台账 → 设备 → 生产批次 → 采集项」下，按批次导入。
+-- 演示数据见 PPR/测试数据/设备采集模拟数据/*.xlsx，从采集项页面的「Excel 导入」导入即可。
 
 -- 预警事件不预置演示数据：ppr_alert_event 全部由预警判定引擎在导入 / 新增 / 编辑产品数据时自动生成。
 -- 判定逻辑见 code/src/lib/quality-analysis/alert-engine.ts：

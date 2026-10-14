@@ -434,33 +434,34 @@ export function DiagnosisClient() {
           <div className="grid grid-cols-3 gap-2"><Button size="sm" variant="outline" onClick={() => saveConclusion(item, 'rejected')}><X size={14} />驳回</Button><Button size="sm" variant="outline" onClick={() => saveConclusion(item)}><Save size={14} />保存</Button><Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => saveConclusion(item, 'confirmed')}><Check size={14} />确认</Button></div>
         </CardContent></Card>)}</div>
 
-        {reportReady && <Card className="border-blue-200 bg-blue-50/60 shadow-sm">
-          <CardHeader className="border-b border-blue-100 pb-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <CardTitle className="flex items-center gap-2 text-base"><Bot size={17} />下一步：生成 8D 报告</CardTitle>
-                <p className="mt-1 text-xs text-slate-600">点击后会先保存本页填写的实际发现与工程师意见，然后进入 8D 报告页；8D Agent 在报告页读取诊断摘要、本页引用的限值与批次/设备数据、上方结论卡片和工程师记录，实时生成 D1–D8，生成过程与草稿内容都在报告页展示。</p>
+        {reportReady && <Card className="mb-5 gap-0 border-blue-200 bg-blue-50/60 py-0 shadow-sm">
+          <CardHeader className="border-b border-blue-100 px-4 pt-3 pb-3">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                <CardTitle className="flex items-center gap-1.5 text-base"><Bot size={16} />下一步：生成 8D 报告</CardTitle>
+                <p className="text-xs text-slate-600">先保存本页填写的实际发现与工程师意见，再到报告页生成 D1–D8。</p>
               </div>
               {report
                 ? <Badge className={report.generation_engine === 'agent' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}>{report.generation_engine === 'agent' ? 'LangChain Agent 生成' : report.generation_engine === 'rule' ? '规则模板生成' : '已有草稿'}</Badge>
                 : <Badge variant="outline">尚无草稿</Badge>}
             </div>
           </CardHeader>
-          <CardContent className="space-y-3 p-4">
-            {report ? <div className="grid gap-3 rounded-xl border border-blue-100 bg-white p-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
-              <div><span className="text-slate-500">报告编号</span><b className="mt-0.5 block font-mono text-slate-900">{String(report.report_no || '—')}</b></div>
-              <div><span className="text-slate-500">生成模型</span><b className="mt-0.5 block text-slate-900">{String(report.model_name || '规则模板（不调用模型）')}</b></div>
-              <div><span className="text-slate-500">生成时间</span><b className="mt-0.5 block text-slate-900">{report.generated_at ? String(report.generated_at) : '—'}</b></div>
-              <div><span className="text-slate-500">证据轨迹</span><b className="mt-0.5 block text-slate-900">{asTraceCount(report.tool_trace_json) ? `${asTraceCount(report.tool_trace_json)} 次工具调用` : '规则模板无工具轨迹'}</b></div>
-            </div> : <p className="text-xs text-slate-600">尚未生成 8D 报告。建议先在结论卡片中填写实际发现与工程师意见，并完成确认或否决，Agent 会据此区分「已确认根因 / 已排除项 / 仍待验证假设」。</p>}
-            {Boolean(report?.fallback_reason) && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800"><b>降级说明：</b>{String(report?.fallback_reason)}</div>}
-            {report?.status === 'finalized' && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">报告已归档：可在历史分析或「进入 8D 工作台」中继续修改 D1–D8，归档状态下不提供重新生成。</div>}
+          <CardContent className="space-y-2 p-4">
+            {/* 有草稿时用一行摘要行，替代原来四格带边框的展示块，省下一大块纵向空间。 */}
+            {report ? <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-600">
+              <span>报告编号 <b className="font-mono text-slate-900">{String(report.report_no || '—')}</b></span>
+              <span>· 生成模型 <b className="text-slate-900">{String(report.model_name || '规则模板（不调用模型）')}</b></span>
+              <span>· 生成时间 <b className="text-slate-900">{report.generated_at ? String(report.generated_at) : '—'}</b></span>
+              <span>· 证据轨迹 <b className="text-slate-900">{asTraceCount(report.tool_trace_json) ? `${asTraceCount(report.tool_trace_json)} 次工具调用` : '规则模板无工具轨迹'}</b></span>
+            </p> : <p className="text-xs text-slate-600">尚未生成 8D 报告。建议先在结论卡片中填写实际发现与工程师意见，并完成确认或否决，Agent 会据此区分「已确认根因 / 已排除项 / 仍待验证假设」。</p>}
+            {Boolean(report?.fallback_reason) && <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"><b>降级说明：</b>{String(report?.fallback_reason)}</div>}
+            {report?.status === 'finalized' && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">报告已归档：可在历史分析或「进入 8D 工作台」中继续修改 D1–D8，归档状态下不提供重新生成。</div>}
             <div className="flex flex-wrap items-center gap-3">
-              <Button onClick={goGenerate} disabled={navigating || report?.status === 'finalized'} className="bg-indigo-600 hover:bg-indigo-700">
-                {navigating ? <Loader2 className="animate-spin" size={16} /> : report ? <RefreshCw size={16} /> : <Bot size={16} />}
+              <Button size="sm" onClick={goGenerate} disabled={navigating || report?.status === 'finalized'} className="bg-indigo-600 hover:bg-indigo-700">
+                {navigating ? <Loader2 className="animate-spin" size={15} /> : report ? <RefreshCw size={15} /> : <Bot size={15} />}
                 {report ? '重新生成 8D 报告' : '生成 8D 报告'}
               </Button>
-              {report ? <Button asChild className="bg-blue-700 hover:bg-blue-800"><Link href={`/quality/report?analysisId=${analysisId}`}>进入 8D 工作台<ChevronRight size={16} /></Link></Button> : null}
+              {report ? <Button size="sm" asChild className="bg-blue-700 hover:bg-blue-800"><Link href={`/quality/report?analysisId=${analysisId}`}>进入 8D 工作台<ChevronRight size={15} /></Link></Button> : null}
               <span className="text-xs text-slate-500">{navigating ? '正在保存工程师验证记录并跳转…' : '生成过程在 8D 报告页实时展示。'}</span>
             </div>
           </CardContent>
@@ -475,7 +476,7 @@ export function DiagnosisClient() {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><CheckCircle2 className="text-emerald-600" size={18} />分析完成</DialogTitle>
           <DialogDescription>
-            已生成 {((analysis?.conclusions as Row[]) || []).length} 条待验证结论{analysis ? `，保存在分析任务 ${String(analysis.run_no)}` : ''}。结论只是待验证假设，请逐条填写实际发现与工程师意见后再确认或驳回。
+            已生成 {((analysis?.conclusions as Row[]) || []).length} 条待验证结论{analysis ? `，保存在分析任务 ${String(analysis.run_no)}` : ''}。结论只是待验证假设：请逐条填写实际发现与工程师意见并确认或驳回，完成验证后再生成 8D 报告。
           </DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3 text-sm">
@@ -485,10 +486,8 @@ export function DiagnosisClient() {
           <div><span className="text-xs text-slate-500">耗时</span><b className="mt-0.5 block">{String(analysis?.latency_ms || 0)} ms</b></div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setCompleted(false)}>查看结论</Button>
-          <Button className="bg-indigo-600 hover:bg-indigo-700" disabled={!analysisId || navigating} onClick={() => { setCompleted(false); goGenerate(); }}>
-            {navigating ? <Loader2 className="animate-spin" size={16} /> : <Bot size={16} />}
-            生成 8D 报告
+          <Button className="bg-blue-700 hover:bg-blue-800" onClick={() => setCompleted(false)}>
+            <Check size={16} />去填写实际发现与工程师意见
           </Button>
         </DialogFooter>
       </DialogContent>

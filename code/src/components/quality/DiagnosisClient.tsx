@@ -293,40 +293,46 @@ export function DiagnosisClient() {
       alertMetricLabel={metricLabels[String(selected.metric_code ?? '')]}
     />}
 
-    {/* 生成分析移到数据展示之后：先读完限值对照与趋势图，再选择模式生成，结论紧随其后，保证阅读连贯。 */}
-    <Card className="mb-5 border-slate-200 shadow-sm">
-      <CardHeader className="border-b border-slate-100 pb-3"><div className="flex flex-wrap items-baseline gap-x-2 gap-y-1"><CardTitle className="text-base">生成诊断分析</CardTitle><p className="text-xs text-slate-500">基于上方限值对照、批次尺寸趋势与设备工艺数据整理结论；生成过程与结论在下方展示。</p></div></CardHeader>
-      <CardContent className="flex flex-wrap items-center gap-3 p-4">
-        <Select value={mode} onValueChange={(value) => setMode(value as AnalysisMode)}>
-          <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="rule">规则引擎模式</SelectItem>
-            <SelectItem value="agent">LangChain Agent</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button onClick={generate} disabled={generating} className="bg-indigo-600 hover:bg-indigo-700">
-          {generating ? <Loader2 className="animate-spin" size={16} /> : <Bot size={16} />}
-          {analysis ? '重新生成分析' : '生成分析'}
-        </Button>
-        <span className="text-xs text-slate-500">{analysis ? '重新生成会按当前数据重算结论，已确认的结论需重新验证。' : '生成后系统会保存证据、工具轨迹与待验证结论。'}</span>
+    {/* 生成分析、当前模式与执行过程合并为一个区域：读完限值对照与趋势图后，在这里选模式、生成并查看过程，结论紧随其后。
+        Card 自带 py-6 + gap-6，这里用 gap-0 py-0 关掉，改由内部各行自己控制间距，避免折叠后上下留白。 */}
+    <Card className="mb-5 gap-0 border-slate-200 py-0 shadow-sm">
+      <CardHeader className="border-b border-slate-100 px-4 pt-3 pb-3"><div className="flex flex-wrap items-baseline gap-x-2 gap-y-1"><CardTitle className="text-base">生成诊断分析</CardTitle><p className="text-xs text-slate-500">基于上方限值对照、批次尺寸趋势与设备工艺数据整理结论；生成过程与结论在下方展示。</p></div></CardHeader>
+      <CardContent className="p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <Select value={mode} onValueChange={(value) => setMode(value as AnalysisMode)}>
+            <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="rule">规则引擎模式</SelectItem>
+              <SelectItem value="agent">LangChain Agent</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button onClick={generate} disabled={generating} className="bg-indigo-600 hover:bg-indigo-700">
+            {generating ? <Loader2 className="animate-spin" size={16} /> : <Bot size={16} />}
+            {analysis ? '重新生成分析' : '生成分析'}
+          </Button>
+          <span className="text-xs text-slate-500">{analysis ? '重新生成会按当前数据重算结论，已确认的结论需重新验证。' : '生成后系统会保存证据、工具轨迹与待验证结论。'}</span>
+        </div>
+        {/* 原独立的信息条并入本区域：仍是同一张卡的第二行，但不再单独占一张卡和一段外边距。 */}
+        {agentStatus && <div className={`mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-3 py-2 text-xs ${mode === 'agent' && !agentStatus.configured ? 'bg-amber-50 text-amber-800' : 'bg-slate-50 text-slate-600'}`}>
+          <span className="flex items-center gap-1.5 font-medium"><Settings2 size={14} />当前选择：{mode === 'agent' ? 'LangChain Agent' : '规则引擎'}</span>
+          <span>· 系统默认 {agentStatus.mode === 'agent' ? 'Agent' : '规则'}</span>
+          <span>{mode === 'agent' ? (agentStatus.configured ? `模型 ${agentStatus.model} · ${agentStatus.framework}` : `未配置API密钥${agentStatus.fallbackToRule ? '，将自动降级规则模式' : ''}`) : '确定性规则和模板，不调用大模型'}</span>
+        </div>}
       </CardContent>
+      {/* 分析过程作为本区域的折叠区块：折叠后只剩一行，展开后在本区域内滚动查看步骤。 */}
+      <AnalysisProcessPanel
+        embedded
+        events={processEvents}
+        expanded={processExpanded}
+        generating={generating}
+        finished={processFinished}
+        onToggle={() => setProcessExpanded((value) => !value)}
+      />
     </Card>
 
-    {agentStatus && <div className={`mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 text-sm ${mode === 'agent' && !agentStatus.configured ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-blue-200 bg-blue-50 text-blue-800'}`}>
-      <div className="flex items-center gap-2"><Settings2 size={16} /><b>当前选择：{mode === 'agent' ? 'LangChain Agent' : '规则引擎'}</b><span>· 系统默认 {agentStatus.mode === 'agent' ? 'Agent' : '规则'}</span></div>
-      <span>{mode === 'agent' ? (agentStatus.configured ? `模型 ${agentStatus.model} · ${agentStatus.framework}` : `未配置API密钥${agentStatus.fallbackToRule ? '，将自动降级规则模式' : ''}`) : '确定性规则和模板，不调用大模型'}</span>
-    </div>}
-
-    <AnalysisProcessPanel
-      events={processEvents}
-      expanded={processExpanded}
-      generating={generating}
-      finished={processFinished}
-      onToggle={() => setProcessExpanded((value) => !value)}
-    />
-
-    {loading ? <div className="grid h-64 place-items-center"><Loader2 className="animate-spin text-blue-700" /></div> : !analysis ?
-      <Card className="border-dashed border-slate-300"><CardContent className="grid h-64 place-items-center text-center"><div><Bot className="mx-auto mb-3 text-slate-400" /><b>尚未生成诊断分析</b><p className="mt-1 text-sm text-slate-500">选择模式后生成分析，系统会保存证据、工具轨迹和待验证结论。</p></div></CardContent></Card> : <>
+    {/* 空态压成一行提示：原来占 256px 高的占位卡在折叠状态下会留出大片空白。 */}
+    {loading ? <div className="grid h-32 place-items-center"><Loader2 className="animate-spin text-blue-700" /></div> : !analysis ?
+      <Card className="gap-0 border-dashed border-slate-300 py-0"><CardContent className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 px-4 py-6 text-center"><Bot className="text-slate-400" size={16} /><b className="text-sm text-slate-700">尚未生成诊断分析</b><span className="text-xs text-slate-500">选择模式后点击「生成分析」，系统会保存证据、工具轨迹和待验证结论。</span></CardContent></Card> : <>
         {Boolean(analysis.fallback_reason) && <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"><b>Agent降级说明：</b>{String(analysis.fallback_reason)}</div>}
         <Card className="mb-5 border-indigo-200 bg-indigo-50/50 shadow-sm"><CardContent className="flex gap-3 p-5"><Bot className="mt-0.5 shrink-0 text-indigo-600" /><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><b className="text-indigo-950">分析摘要</b><Badge className={engineType === 'agent' ? 'bg-violet-100 text-violet-700' : 'bg-blue-100 text-blue-700'}>{engineType === 'agent' ? 'LangChain Agent' : '规则引擎'}</Badge>{Boolean(analysis.model_name) && <Badge variant="outline">{String(analysis.model_name)}</Badge>}</div><p className="mt-2 text-sm leading-6 text-indigo-900">{String(analysis.summary)}</p><p className="mt-2 text-xs text-indigo-600">{String(analysis.run_no)} · {String(analysis.prompt_version || '')} · {String(analysis.latency_ms || 0)} ms · 生成于 {String(analysis.generated_at)}</p></div></CardContent></Card>
 

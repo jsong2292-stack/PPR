@@ -59,6 +59,7 @@ export function AnalysisProcessPanel({
   onToggle,
   title = '分析过程 · 工具与证据轨迹',
   runningLabel = '生成中',
+  embedded = false,
 }: {
   events: AnalysisProcessEvent[];
   expanded: boolean;
@@ -68,6 +69,8 @@ export function AnalysisProcessPanel({
   /** 面板标题：诊断分析与 8D 生成共用本组件，用标题区分两次运行。 */
   title?: string;
   runningLabel?: string;
+  /** 嵌入外层卡片时不再套 Card，改用分隔线，并把折叠行压成单行，避免折叠后残留上下留白。 */
+  embedded?: boolean;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -81,43 +84,46 @@ export function AnalysisProcessPanel({
   const summaryStyle = statusStyles[summaryStatus];
   const summaryLabel = generating ? runningLabel : hasError ? '执行失败' : hasWarning ? '已完成（含降级）' : finished ? '已完成' : '等待中';
 
-  return <Card className="mb-5 overflow-hidden border-slate-200 bg-white shadow-sm">
-    <button type="button" onClick={onToggle} className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-slate-50">
-      <div className="flex min-w-0 items-center gap-3">
-        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${summaryStyle.icon}`}>
-          {generating ? <Loader2 size={18} className="animate-spin" /> : hasError ? <AlertTriangle size={18} /> : <Bot size={18} />}
-        </span>
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <b className="text-sm text-slate-900">{title}</b>
-            <Badge variant="outline" className={summaryStyle.badge}>{summaryLabel}</Badge>
-          </div>
-          <p className="mt-0.5 truncate text-xs text-slate-500">
-            {expanded ? '展示可审计步骤，不展示模型内部隐式思维链' : `${events.length} 个步骤 · 点击展开查看`}
-          </p>
-        </div>
-      </div>
-      {expanded ? <ChevronUp size={17} className="shrink-0 text-slate-400" /> : <ChevronDown size={17} className="shrink-0 text-slate-400" />}
-    </button>
+  const hint = expanded ? '展示可审计步骤，不展示模型内部隐式思维链' : `${events.length} 个步骤 · 点击展开查看`;
+  const iconSize = embedded ? 15 : 18;
 
-    <div className={`transition-[max-height,opacity] duration-500 ease-in-out ${expanded ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}`}>
-      <CardContent className="border-t border-slate-200 bg-slate-50/70 p-0">
-        <div ref={listRef} className="max-h-80 space-y-0 overflow-y-auto px-4 py-3 text-xs">
-          {events.map((event, index) => {
-            const Icon = stageIcons[event.stage] || CircleDot;
-            const style = statusStyles[event.status];
-            return <div key={`${event.timestamp}-${index}`} className="grid grid-cols-[64px_24px_minmax(0,1fr)] gap-2 border-l border-slate-200 py-2.5 pl-3">
-              <time className="font-mono text-slate-400">{new Date(event.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</time>
-              <span className={`grid h-5 w-5 place-items-center rounded-md ${style.icon}`}><Icon size={12} /></span>
-              <div className="min-w-0">
-                <p className={`font-medium ${style.text}`}>{event.message}</p>
-                {event.detail && <p className="mt-1 break-words font-mono leading-5 text-slate-500">{event.detail}</p>}
-              </div>
-            </div>;
-          })}
-          {generating && <div className="flex items-center gap-2 py-2.5 pl-[94px] text-indigo-600"><span className="h-3 w-1.5 animate-pulse rounded-sm bg-indigo-500" /><span>等待下一步输出</span></div>}
-        </div>
-      </CardContent>
+  /* 折叠行：嵌入模式把标题、状态与提示压在同一行，折叠后只剩一行高度。 */
+  const header = <button type="button" onClick={onToggle} className={`flex w-full items-center justify-between gap-3 text-left transition-colors hover:bg-slate-50 ${embedded ? 'px-4 py-2.5' : 'px-4 py-3'}`}>
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+      <span className={`grid ${embedded ? 'h-7 w-7' : 'h-9 w-9'} shrink-0 place-items-center rounded-lg ${summaryStyle.icon}`}>
+        {generating ? <Loader2 size={iconSize} className="animate-spin" /> : hasError ? <AlertTriangle size={iconSize} /> : <Bot size={iconSize} />}
+      </span>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <b className="text-sm text-slate-900">{title}</b>
+        <Badge variant="outline" className={summaryStyle.badge}>{summaryLabel}</Badge>
+        <span className="text-xs text-slate-500">{hint}</span>
+      </div>
     </div>
-  </Card>;
+    {expanded ? <ChevronUp size={17} className="shrink-0 text-slate-400" /> : <ChevronDown size={17} className="shrink-0 text-slate-400" />}
+  </button>;
+
+  /* 折叠动画：max-height 归零 + overflow-hidden，折叠时高度与留白都归零（此前缺 overflow-hidden，内容仍会被 flex gap 撑出空隙）。 */
+  const body = <div className={`overflow-hidden transition-[max-height,opacity] duration-500 ease-in-out ${expanded ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}`}>
+    <CardContent className="border-t border-slate-200 bg-slate-50/70 p-0">
+      <div ref={listRef} className="max-h-80 overflow-y-auto px-4 py-2.5 text-xs">
+        {events.map((event, index) => {
+          const Icon = stageIcons[event.stage] || CircleDot;
+          const style = statusStyles[event.status];
+          return <div key={`${event.timestamp}-${index}`} className="grid grid-cols-[64px_24px_minmax(0,1fr)] gap-2 border-l border-slate-200 py-2 pl-3">
+            <time className="font-mono text-slate-400">{new Date(event.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</time>
+            <span className={`grid h-5 w-5 place-items-center rounded-md ${style.icon}`}><Icon size={12} /></span>
+            <div className="min-w-0">
+              <p className={`font-medium ${style.text}`}>{event.message}</p>
+              {event.detail && <p className="mt-1 break-words font-mono leading-5 text-slate-500">{event.detail}</p>}
+            </div>
+          </div>;
+        })}
+        {generating && <div className="flex items-center gap-2 py-2 pl-[94px] text-indigo-600"><span className="h-3 w-1.5 animate-pulse rounded-sm bg-indigo-500" /><span>等待下一步输出</span></div>}
+      </div>
+    </CardContent>
+  </div>;
+
+  /* 嵌入模式：外层卡片已经提供了边框和内边距，这里只补一条分隔线，不再嵌套 Card（Card 自带 py-6 + gap-6 会叠出空白）。 */
+  if (embedded) return <div className="border-t border-slate-100">{header}{body}</div>;
+  return <Card className="mb-5 gap-0 overflow-hidden border-slate-200 bg-white py-0 shadow-sm">{header}{body}</Card>;
 }

@@ -102,7 +102,7 @@ export function createQualityAgentTools(
     }),
     {
       name: 'get_batch_measurements',
-      description: '获取当前批次、异常时刻之前的产品检验序列，用于判断趋势和离散波动。',
+      description: '获取当前批次、异常时刻之前的外径、壁厚和不圆度检验序列，用于判断异常形态、尺寸组合、连续趋势和离散波动；检验时间不当然等于样管在设备处的生产时间。',
       schema: z.object({ limit: z.number().int().min(3).max(30).default(10) }),
     }
   );
@@ -121,7 +121,7 @@ export function createQualityAgentTools(
     }),
     {
       name: 'get_equipment_window',
-      description: '获取异常时刻前后的设备采集数据。同期变化只能作为相关线索，不能直接证明因果。',
+      description: '获取异常检验时刻前后的温度、压力和牵引速度记录。时间接近只能作为相关线索；未完成生产时间、长度码、距离和检测延迟对齐时，不得称为该样管对应参数或因果证据。',
       schema: z.object({ windowMinutes: z.number().int().min(30).max(1440).default(240) }),
     }
   );
@@ -130,7 +130,8 @@ export function createQualityAgentTools(
     async ({ limit }: { limit: number }) => trace(traces, 'get_reference_measurements', { limit }, reporter, async () => {
       const safeLimit = Math.max(3, Math.min(50, limit));
       return dbClient.queryAll<Row>(`SELECT m.id, m.record_no, m.inspect_time,
-        m.outer_diameter_mm, m.min_wall_thickness_mm, m.ovality_mm,
+        m.outer_diameter_mm, m.min_wall_thickness_mm, m.max_wall_thickness_mm,
+        m.max_outer_diameter_mm, m.min_outer_diameter_mm, m.ovality_mm,
         m.quality_flag, b.batch_no, b.production_group
         FROM ppr_product_measurement m
         JOIN ppr_batch b ON b.id=m.batch_id
@@ -139,7 +140,7 @@ export function createQualityAgentTools(
     }),
     {
       name: 'get_reference_measurements',
-      description: '获取相同产品规格的其他正常批次记录，用于参考对照；跨批次差异不等同正式控制限。',
+      description: '获取相同产品规格的其他正常标记批次记录，用于较好状态参考；若同产线、口模/定径套、层结构、配方、速度和测量方法未确认，跨批次差异只能作弱参考，不能称为正式控制限或最佳工艺窗口。',
       schema: z.object({ limit: z.number().int().min(3).max(50).default(15) }),
     }
   );
@@ -169,7 +170,7 @@ export function createQualityAgentTools(
     }),
     {
       name: 'get_metric_definition',
-      description: '获取异常指标的口径、单位、影响因素，以及当前产品规格适用的判定限值。',
+      description: '获取异常指标口径、单位、通用影响因素和当前产品规格限值。影响因素只是排查方向，不是当前事件证据；规格限值与正常参考范围、工艺窗口不得混用。',
       schema: z.object({}),
     }
   );

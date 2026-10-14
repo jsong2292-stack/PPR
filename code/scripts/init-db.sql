@@ -537,25 +537,9 @@ CREATE TABLE IF NOT EXISTS ppr_eight_d_report (
   CONSTRAINT fk_ppr_report_analysis FOREIGN KEY (analysis_id) REFERENCES ppr_analysis_run(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PPR过程异常8D报告';
 
--- 历史归档：报告定稿时生成不可变业务摘要，供历史分析检索。
-CREATE TABLE IF NOT EXISTS ppr_history_archive (
-  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键，自增编号',
-  archive_no VARCHAR(64) NOT NULL COMMENT '归档编号，全局唯一',
-  report_id BIGINT UNSIGNED NOT NULL COMMENT '来源8D报告ID',
-  event_no VARCHAR(64) NOT NULL COMMENT '来源预警事件编号快照',
-  batch_no VARCHAR(64) NOT NULL COMMENT '来源生产批次号快照',
-  metric_code VARCHAR(64) NOT NULL COMMENT '来源异常指标编码快照',
-  risk_level VARCHAR(32) NOT NULL COMMENT '来源风险级别快照',
-  problem_summary TEXT NOT NULL COMMENT '问题摘要快照',
-  confirmed_root_cause TEXT NULL COMMENT '已确认根因或主要验证结论快照',
-  corrective_action TEXT NULL COMMENT '永久纠正措施快照',
-  archived_by VARCHAR(100) NULL COMMENT '归档操作人',
-  archived_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '归档时间',
-  PRIMARY KEY (id),
-  UNIQUE KEY uk_ppr_history_archive_no (archive_no),
-  UNIQUE KEY uk_ppr_history_report (report_id),
-  CONSTRAINT fk_ppr_history_report FOREIGN KEY (report_id) REFERENCES ppr_eight_d_report(id) ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='PPR质量异常历史归档';
+-- 历史分析没有独立表：一条 8D 报告就是一条历史记录（status: draft 草稿 / finalized 归档），
+-- 历史分析列表直接查 ppr_eight_d_report，点进去复用同一套报告页继续编辑。
+-- 早期的 ppr_history_archive 归档快照表已废弃，见 scripts/migrations/012_drop_history_archive.sql。
 
 -- 平台演示管理员：仅用于本地首次启动，生产部署必须修改密码或通过安装向导创建管理员。
 INSERT INTO users (id, phone, email, nickname, password, role, status, auth_provider)

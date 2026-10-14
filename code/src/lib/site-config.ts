@@ -11,10 +11,10 @@ export const siteConfig={
   nav:[
     {label:'质量工作台',href:'/quality/monitor'},
     // 「异常诊断」不挂在顶部导航：诊断页由预警队列的「进入诊断」进入。
-    {label:'8D报告',href:'/quality/report'},
+    // 「8D报告」同理不挂导航：从诊断页生成/进入，或从历史分析列表点记录进入。
     {label:'历史分析',href:'/quality/history'},
   ] as NavItem[],
-  footerColumns:[{title:'质量闭环',links:[{label:'监控与预警',href:'/quality/monitor'},{label:'异常诊断',href:'/quality/diagnosis'},{label:'8D报告',href:'/quality/report'}]},{title:'平台管理',links:[{label:'个人资料',href:'/user/profile'},{label:'用户管理',href:'/admin/users'},{label:'系统设置',href:'/admin/settings'}]}] as FooterColumn[],
+  footerColumns:[{title:'质量闭环',links:[{label:'监控与预警',href:'/quality/monitor'},{label:'异常诊断',href:'/quality/diagnosis'},{label:'历史分析',href:'/quality/history'}]},{title:'平台管理',links:[{label:'个人资料',href:'/user/profile'},{label:'用户管理',href:'/admin/users'},{label:'系统设置',href:'/admin/settings'}]}] as FooterColumn[],
   footerNote:'基于日丰通用平台脚手架构建；演示规则和阈值需在正式上线前完成现场校准。',
   enableQrDialog:false,qrImage:'/wechat-qrcode.png',qrTitle:'关注公众号',qrDescription:'扫码关注我们',
 } as const;

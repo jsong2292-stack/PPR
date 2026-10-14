@@ -1,0 +1,22 @@
+-- ---------------------------------------------------------------------------
+-- 012 历史分析改为直接读 8D 报告，废弃 ppr_history_archive
+--
+-- 背景：历史分析原先靠一张归档快照表（ppr_history_archive）承载，报告定稿时写入
+-- 「问题摘要 / 已确认根因 / 纠正预防措施」等字段。实际使用中有两个问题：
+--   1. 一条历史记录被拆到两张表（快照 + 报告），状态只能靠报告表的 draft/finalized 反推；
+--   2. 历史列表只能看快照，无法回到 8D 报告原始页面继续编辑。
+-- 改为：一条 8D 报告就是一条历史记录，状态即报告状态（draft=草稿 / finalized=归档），
+-- 列表直接查 ppr_eight_d_report，点进去复用同一套报告页编辑。
+--
+-- 因此本迁移删除 ppr_history_archive。
+--   - 表内所有字段都是 ppr_eight_d_report + ppr_analysis_conclusion 的派生快照
+--     （problem_summary=d2、confirmed_root_cause=已确认结论/d4、corrective_action=d5~d7），
+--     删除不会丢失源数据，报告表与结论表保持原样。
+--   - 归档保护（批次清理拦截、预警事件只关不删）已改为判断 d.status='finalized'，
+--     不再依赖本表的 RESTRICT 外键，见 src/lib/quality-batch-cleanup.ts 与
+--     src/lib/quality-analysis/alert-engine.ts。
+--
+-- 幂等：表不存在时 DROP TABLE IF EXISTS 直接跳过。
+-- ---------------------------------------------------------------------------
+
+DROP TABLE IF EXISTS ppr_history_archive;

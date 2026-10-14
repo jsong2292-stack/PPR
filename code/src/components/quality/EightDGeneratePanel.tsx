@@ -69,14 +69,14 @@ export function EightDGeneratePanel({
         </div> : <p className="text-xs text-slate-600">尚无 8D 报告草稿。生成前请先回到诊断页填写实际发现与工程师意见并完成确认或否决，Agent 会据此区分「已确认根因 / 已排除项 / 仍待验证假设」。</p>}
 
         {report?.fallback_reason ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800"><b>降级说明：</b>{String(report.fallback_reason)}</div> : null}
-        {finalized ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">报告已定稿并归档，不能重新生成。如需修改请由管理员撤销定稿后重试。</div> : null}
+        {finalized ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">报告已归档，为保证归档留痕不提供重新生成；仍可直接编辑下方 D1–D8 并点「保存修改」同步到历史分析。</div> : null}
 
         <div className="flex flex-wrap items-center gap-3">
           <Button onClick={onGenerate} disabled={generating || finalized} className="bg-indigo-600 hover:bg-indigo-700">
             {generating ? <Loader2 className="animate-spin" size={16} /> : report ? <RefreshCw size={16} /> : <Bot size={16} />}
             {report ? '重新生成 8D 报告' : '生成 8D 报告'}
           </Button>
-          <span className="text-xs text-slate-500">{report ? '重新生成会覆盖 D1–D8 草稿内容，已定稿报告不可覆盖。' : '生成后会写入报告草稿，并保留模型、提示词版本与工具证据轨迹。'}</span>
+          <span className="text-xs text-slate-500">{report ? '重新生成会覆盖 D1–D8 草稿内容；已归档报告改为手工编辑后保存修改。' : '生成后会写入报告草稿，并保留模型、提示词版本与工具证据轨迹。'}</span>
         </div>
       </CardContent>
     </Card>

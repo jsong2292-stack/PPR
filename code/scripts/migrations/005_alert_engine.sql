@@ -10,10 +10,11 @@
 --   1. 给事件加来源标记 source：引擎生成 engine，历史演示/人工遗留 legacy。
 --      查询队列时只看 engine，遗留行保留在表里仅用于维持外键追溯链。
 --   2. 删除那 4 条手工演示事件。它们全部是 init-db.sql 的夹具、不是业务数据。
---      但其中 QE-20261010-001 已被一份已定稿并归档的 8D 报告引用
---      （ppr_history_archive → ppr_eight_d_report → ppr_analysis_run.alert_id 是 ON DELETE RESTRICT），
---      硬删会报外键错误，因此用 h.id IS NULL 把引用链上的行排除掉、只标成 legacy 保留。
+--      但其中 QE-20261010-001 已被一份已定稿并归档的 8D 报告引用，归档报告是留痕证据、
+--      不能连带删除，因此用 d.id IS NULL 把归档链上的行排除掉、只标成 legacy 保留。
 --      范围已收窄到固定编号，可安全重复执行。
+--      （历史版本依靠 ppr_history_archive 的 RESTRICT 外键拦住这次删除；该表已由迁移 012 删除，
+--        这里改为直接判断 ppr_eight_d_report.status='finalized'，与批次清理、预警引擎的口径一致。）
 --   3. 把 1 号批次 12121D0032 的壁厚演示序列调成真正的「连续 3 点接近下限」，
 --      让中风险规则在演示数据里有实例。UPDATE 带原始值 + 原备注双重条件，
 --      只可能命中未被人工修改过的种子行。
@@ -35,10 +36,9 @@ UPDATE ppr_alert_event SET source = 'legacy' WHERE rule_code NOT IN ('R0', 'R3',
 
 DELETE a FROM ppr_alert_event a
 LEFT JOIN ppr_analysis_run r ON r.alert_id = a.id
-LEFT JOIN ppr_eight_d_report d ON d.analysis_id = r.id
-LEFT JOIN ppr_history_archive h ON h.report_id = d.id
+LEFT JOIN ppr_eight_d_report d ON d.analysis_id = r.id AND d.status = 'finalized'
 WHERE a.event_no IN ('QE-20261010-001', 'QE-20261010-002', 'QE-20261011-001', 'QE-20261012-001')
-  AND h.id IS NULL;
+  AND d.id IS NULL;
 
 -- 上一步保留下来的遗留事件统一关闭并改写说明，避免它出现在待处理队列里。
 UPDATE ppr_alert_event SET status = 'closed', threshold_text = '演示遗留事件，已被判定引擎的真实判定取代'

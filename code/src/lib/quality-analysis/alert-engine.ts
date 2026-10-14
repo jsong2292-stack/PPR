@@ -103,7 +103,7 @@ export interface PlannedAlert {
   detectedAt: Date | string;
 }
 
-/** 已存在的引擎事件；archived 表示它已被归档的 8D 报告引用，不能删除。 */
+/** 已存在的引擎事件；archived 表示它已有归档的 8D 报告，不能删除。 */
 interface ExistingAlert {
   id: number;
   measurement_id: number;
@@ -344,14 +344,13 @@ export async function evaluateAlerts(options: { batchNos?: string[] } = {}): Pro
   await dbClient.transaction(async (client: TransactionClient) => {
     const placeholders = measurementIds.map(() => '?').join(',');
     const metricPlaceholders = ENGINE_METRIC_CODES.map(() => '?').join(',');
-    // 只看引擎自己产出的事件（source='engine'），并取出「是否已被归档 8D 报告引用」：
-    // 归档链上的事件被外键 RESTRICT 保护，过期时只能关闭、不能删除。
+    // 只看引擎自己产出的事件（source='engine'），并取出「是否已有归档的 8D 报告」：
+    // 已归档报告是留痕证据，对应事件过期时只能关闭、不能删除。
     // notified_level 是企微推送去重状态：只有级别高于它的新异常才需要再推一次。
     const existingRows = await client.queryAll(`SELECT a.id, a.measurement_id, a.metric_code, a.status, a.notified_level,
       (SELECT COUNT(*) FROM ppr_analysis_run r
         JOIN ppr_eight_d_report d ON d.analysis_id = r.id
-        JOIN ppr_history_archive h ON h.report_id = d.id
-        WHERE r.alert_id = a.id) AS archived
+        WHERE r.alert_id = a.id AND d.status = 'finalized') AS archived
       FROM ppr_alert_event a
       WHERE a.source = 'engine' AND a.measurement_id IN (${placeholders}) AND a.metric_code IN (${metricPlaceholders})`,
       [...measurementIds, ...ENGINE_METRIC_CODES]);
@@ -372,7 +371,7 @@ export async function evaluateAlerts(options: { batchNos?: string[] } = {}): Pro
         continue;
       }
       keptIds.add(Number(current.id));
-      // 原地更新而不是删了重建：事件ID 是诊断 / 8D 报告 / 历史归档的外键，必须保持稳定。
+      // 原地更新而不是删了重建：事件ID 是诊断与 8D 报告的外键，必须保持稳定。
       // 已进入「分析中」的事件不因为重新扫描被打回「待分析」。
       const status = alert.riskLevel === 'normal' ? 'closed' : (current.status === 'analyzing' ? 'analyzing' : 'open');
       if (abnormal && LEVEL_WEIGHT[alert.riskLevel] > notifiedWeight(current.notified_level)) {
@@ -387,7 +386,7 @@ export async function evaluateAlerts(options: { batchNos?: string[] } = {}): Pro
       );
     }
 
-    // 不再成立的历史事件：没有归档引用的直接删除，被归档报告引用的只能关闭，保住追溯链。
+    // 不再成立的历史事件：没有归档报告的直接删除，已有归档报告的只能关闭，保住追溯链。
     const stale = existing.filter((row) => !keptIds.has(Number(row.id)));
     const deletable = stale.filter((row) => !Number(row.archived)).map((row) => Number(row.id));
     const closable = stale.filter((row) => Number(row.archived)).map((row) => Number(row.id));

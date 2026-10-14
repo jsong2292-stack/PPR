@@ -360,7 +360,7 @@ export function DiagnosisClient() {
               <div><span className="text-slate-500">证据轨迹</span><b className="mt-0.5 block text-slate-900">{asTraceCount(report.tool_trace_json) ? `${asTraceCount(report.tool_trace_json)} 次工具调用` : '规则模板无工具轨迹'}</b></div>
             </div> : <p className="text-xs text-slate-600">尚未生成 8D 报告。建议先在结论卡片中填写实际发现与工程师意见，并完成确认或否决，Agent 会据此区分「已确认根因 / 已排除项 / 仍待验证假设」。</p>}
             {Boolean(report?.fallback_reason) && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800"><b>降级说明：</b>{String(report?.fallback_reason)}</div>}
-            {report?.status === 'finalized' && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">报告已定稿并归档，不能重新生成。</div>}
+            {report?.status === 'finalized' && <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">报告已归档：可在历史分析或「进入 8D 工作台」中继续修改 D1–D8，归档状态下不提供重新生成。</div>}
             <div className="flex flex-wrap items-center gap-3">
               <Button onClick={goGenerate} disabled={navigating || report?.status === 'finalized'} className="bg-indigo-600 hover:bg-indigo-700">
                 {navigating ? <Loader2 className="animate-spin" size={16} /> : report ? <RefreshCw size={16} /> : <Bot size={16} />}

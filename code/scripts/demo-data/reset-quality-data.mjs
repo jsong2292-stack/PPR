@@ -25,9 +25,8 @@ const connection = await mysql.createConnection({
   password: decodeURIComponent(url.password), database: url.pathname.slice(1),
 });
 
-// 顺序不能颠倒：归档 RESTRICT 住 8D 报告，8D / 结论 / 任务 / 预警是层层 CASCADE 下来的。
+// 顺序不能颠倒：8D 报告 / 结论 / 任务 / 预警是层层 CASCADE 下来的。
 const steps = [
-  'ppr_history_archive',
   'ppr_eight_d_report',
   'ppr_analysis_conclusion',
   'ppr_analysis_run',

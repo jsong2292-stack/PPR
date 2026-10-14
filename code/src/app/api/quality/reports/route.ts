@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { dbClient, makeBusinessNo } from '@/lib/quality';
+import { dbClient } from '@/lib/quality';
 import { getCurrentUser } from '@/lib/auth';
 import { createEmptyDraft, queryReport } from '@/lib/quality-report';
 
@@ -48,6 +48,13 @@ export async function POST(request: NextRequest) {
   }
 }
 
+/**
+ * 保存报告内容，`finalize=true` 时同时归档。
+ *
+ * 历史分析列表直接读 ppr_eight_d_report，因此这里只需维护报告自身：
+ * 普通保存保持当前状态（草稿仍是草稿，归档仍是归档），归档时把状态推进到 finalized。
+ * 已归档报告再次提交 finalize 视为幂等，不重复执行关单副作用。
+ */
 export async function PUT(request: NextRequest) {
   if (!(await getCurrentUser())) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   const body = await request.json().catch(() => ({}));
@@ -63,24 +70,18 @@ export async function PUT(request: NextRequest) {
         JOIN ppr_alert_event e ON e.id=a.alert_id JOIN ppr_product_measurement m ON m.id=e.measurement_id
         WHERE r.id=?`, [id]);
       if (!report) return NextResponse.json({ error: '报告不存在' }, { status: 404 });
-      const missing = ['d1','d2','d3','d4','d5','d6','d7','d8'].filter((field) => !String(body[field] || '').trim());
-      if (missing.length) return NextResponse.json({ error: `定稿前请补齐：${missing.map((item) => item.toUpperCase()).join('、')}` }, { status: 400 });
-      // 定稿纪律：没有工程师已确认的结论时不允许把未验证假设当作根因结案。
-      const confirmed = await dbClient.queryAll<Row>("SELECT hypothesis,actual_finding,engineer_comment FROM ppr_analysis_conclusion WHERE analysis_id=? AND engineer_decision='confirmed' ORDER BY sort_no", [report.analysis_id]);
-      if (!confirmed.length) {
-        return NextResponse.json({ error: '定稿前请先在诊断页确认至少一条结论，未经确认的假设不能作为根因结案' }, { status: 400 });
+      if (String(report.status) !== 'finalized') {
+        const missing = ['d1','d2','d3','d4','d5','d6','d7','d8'].filter((field) => !String(body[field] || '').trim());
+        if (missing.length) return NextResponse.json({ error: `定稿前请补齐：${missing.map((item) => item.toUpperCase()).join('、')}` }, { status: 400 });
+        // 定稿纪律：没有工程师已确认的结论时不允许把未验证假设当作根因结案。
+        const confirmed = await dbClient.queryAll<Row>("SELECT hypothesis,actual_finding,engineer_comment FROM ppr_analysis_conclusion WHERE analysis_id=? AND engineer_decision='confirmed' ORDER BY sort_no", [report.analysis_id]);
+        if (!confirmed.length) {
+          return NextResponse.json({ error: '定稿前请先在诊断页确认至少一条结论，未经确认的假设不能作为根因结案' }, { status: 400 });
+        }
+        await dbClient.query("UPDATE ppr_eight_d_report SET status='finalized', finalized_at=NOW() WHERE id=?", [id]);
+        await dbClient.query("UPDATE ppr_analysis_run SET status='completed' WHERE id=?", [report.analysis_id]);
+        await dbClient.query("UPDATE ppr_alert_event e JOIN ppr_analysis_run a ON a.alert_id=e.id SET e.status='closed' WHERE a.id=?", [report.analysis_id]);
       }
-      await dbClient.query("UPDATE ppr_eight_d_report SET status='finalized', finalized_at=NOW() WHERE id=?", [id]);
-      await dbClient.query(`INSERT INTO ppr_history_archive
-        (archive_no, report_id, event_no, batch_no, metric_code, risk_level, problem_summary, confirmed_root_cause, corrective_action, archived_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE problem_summary=VALUES(problem_summary), confirmed_root_cause=VALUES(confirmed_root_cause), corrective_action=VALUES(corrective_action), archived_by=VALUES(archived_by), archived_at=NOW()`, [
-          makeBusinessNo('AR'), id, report.event_no, report.batch_no, report.metric_code, report.risk_level,
-          body.d2, confirmed.map((item) => `${item.hypothesis}${item.actual_finding ? `；验证：${item.actual_finding}` : ''}`).join('\n') || body.d4,
-          `${body.d5}\n${body.d6}\n${body.d7}`, body.owner_name || '质量工程师',
-        ]);
-      await dbClient.query("UPDATE ppr_analysis_run SET status='completed' WHERE id=?", [report.analysis_id]);
-      await dbClient.query("UPDATE ppr_alert_event e JOIN ppr_analysis_run a ON a.alert_id=e.id SET e.status='closed' WHERE a.id=?", [report.analysis_id]);
     }
     const row = await dbClient.queryOne<Row>('SELECT * FROM ppr_eight_d_report WHERE id=?', [id]);
     return NextResponse.json({ data: row });

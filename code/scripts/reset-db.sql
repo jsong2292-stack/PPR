@@ -10,7 +10,6 @@ SET FOREIGN_KEY_CHECKS = 0;
 
 DROP VIEW IF EXISTS v_ppr_batch;
 DROP VIEW IF EXISTS ppr_batch;
-DROP TABLE IF EXISTS ppr_history_archive;
 DROP TABLE IF EXISTS ppr_eight_d_report;
 DROP TABLE IF EXISTS ppr_analysis_conclusion;
 DROP TABLE IF EXISTS ppr_analysis_run;

@@ -23,7 +23,7 @@ export interface MeasurementCleanup {
   alerts: number;
   /** 由这些预警事件产生的 8D 报告份数 */
   reports: number;
-  /** 已归档 8D 报告的归档号；非空即禁止清理 */
+  /** 状态为「归档」的 8D 报告编号；非空即禁止清理 */
   archivedReports: string[];
 }
 
@@ -38,7 +38,7 @@ export function describeMeasurementCleanup(info: MeasurementCleanup): string {
 }
 
 export function describeArchivedReports(info: MeasurementCleanup): string {
-  return `批次「${info.batchNo}」下的检验记录已归档为 8D 报告（${info.archivedReports.join('、')}），为保证归档留痕不能清理。请先在历史归档中处理这些报告。`;
+  return `批次「${info.batchNo}」下的检验记录已归档为 8D 报告（${info.archivedReports.join('、')}），为保证归档留痕不能清理。请先在历史分析中处理这些报告。`;
 }
 
 /** 统计该批次检验记录侧的关联数据；批次号不存在时返回全 0。 */
@@ -55,14 +55,13 @@ export async function loadMeasurementCleanup(batchNo: string): Promise<Measureme
     [batchNo, batchNo, batchNo]
   );
 
-  // 归档表对报告是 RESTRICT：只要这里非空，删报告那步一定失败，所以提前拦下来。
-  const archives = await dbClient.queryAll<{ archive_no: string }>(
-    `SELECT h.archive_no FROM ppr_history_archive h
-       JOIN ppr_eight_d_report d ON d.id=h.report_id
+  // 已归档的报告是留痕证据：只要这里非空就禁止清理这批检验记录。
+  const archives = await dbClient.queryAll<{ report_no: string }>(
+    `SELECT d.report_no FROM ppr_eight_d_report d
        JOIN ppr_analysis_run ar ON ar.id=d.analysis_id
        JOIN ppr_alert_event a ON a.id=ar.alert_id
        JOIN ppr_product_measurement m ON m.id=a.measurement_id
-      WHERE m.batch_no=? ORDER BY h.id`,
+      WHERE m.batch_no=? AND d.status='finalized' ORDER BY d.id`,
     [batchNo]
   );
 
@@ -71,7 +70,7 @@ export async function loadMeasurementCleanup(batchNo: string): Promise<Measureme
     measurements: Number(counts?.measurements ?? 0),
     alerts: Number(counts?.alerts ?? 0),
     reports: Number(counts?.reports ?? 0),
-    archivedReports: archives.map((row) => String(row.archive_no)),
+    archivedReports: archives.map((row) => String(row.report_no)),
   };
 }
 

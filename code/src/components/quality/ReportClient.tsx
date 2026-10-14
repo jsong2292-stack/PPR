@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { CheckCircle2, Download, FileText, Loader2, Printer, Save, ShieldCheck, Sparkles } from 'lucide-react';
+import { Archive, CheckCircle2, Download, FileText, Loader2, Printer, Save, ShieldCheck, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -134,15 +134,23 @@ export function ReportClient() {
   }, [load, start, router, analysisId]);
 
   const update = (key: string, value: string) => setReportRow(report ? { ...report, [key]: value } : report);
+  /**
+   * 保存草稿 / 归档。历史分析列表直接读报告表，因此一次保存就是这条历史记录的
+   * 内容与状态更新：finalize=false 保持当前状态（草稿仍是草稿，归档仍是归档），
+   * finalize=true 把状态推进到归档。
+   */
   const save = async (finalize = false) => {
     if (!report) return;
+    const archived = String(report.status) === 'finalized';
     setSaving(true);
     try {
       const res = await fetch('/api/quality/reports', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...report, finalize }) });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
       setReportRow(json.data);
-      toast.success(finalize ? '报告已定稿并归档' : '草稿已保存');
+      toast.success(finalize
+        ? '报告已归档，历史分析中的状态已更新为「归档」'
+        : archived ? '修改已保存，历史分析中的这条记录已同步' : '草稿已保存，可在历史分析中继续编辑');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '保存失败');
     } finally {
@@ -191,7 +199,7 @@ export function ReportClient() {
   />;
 
   const statusBadge = finalized
-    ? <Badge className="bg-emerald-100 text-emerald-700">已定稿</Badge>
+    ? <Badge className="bg-emerald-100 text-emerald-700">已归档</Badge>
     : generating
       ? <Badge className="bg-indigo-100 text-indigo-700">生成中</Badge>
       : report ? <Badge className="bg-amber-100 text-amber-700">草稿</Badge> : <Badge className="bg-amber-100 text-amber-700">尚无草稿</Badge>;
@@ -223,16 +231,34 @@ export function ReportClient() {
   </>;
 
   return <>
-    <PageHeader title="8D 报告工作台" description="继承诊断结论，完成工程师编辑、校验、定稿与历史归档。" actions={statusBadge} />
+    <PageHeader title="8D 报告工作台" description="继承诊断结论，完成工程师编辑、校验、定稿与归档；每次保存都会同步到历史分析。" actions={statusBadge} />
     {generatePanel}
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
-      <Card className="border-slate-200 shadow-sm"><CardHeader className="border-b border-slate-200"><div className="flex items-start justify-between gap-3"><div><CardTitle className="text-xl">{String(liveDraft.title || report.title)}</CardTitle><p className="mt-2 font-mono text-xs text-slate-500">{String(report.report_no)} · {String(report.event_no)}</p></div><Badge className="bg-indigo-50 text-indigo-700">{report.generation_engine === 'agent' ? 'Agent 生成草稿' : report.generation_engine === 'rule' ? '规则模板草稿' : '人工填写草稿'}</Badge></div><div className="mt-4 grid gap-3 rounded-xl bg-slate-50 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4"><div><span className="text-xs text-slate-500">产品规格</span><b className="block">{String(report.spec_name)}</b></div><div><span className="text-xs text-slate-500">生产批次</span><b className="block">{String(report.batch_no)}</b></div><div><span className="text-xs text-slate-500">异常指标</span><b className="block">{String(report.metric_code)}</b></div><div><span className="text-xs text-slate-500">风险级别</span><b className="block">{String(report.risk_level)}</b></div></div></CardHeader><DraftSections values={liveDraft} disabled={Boolean(finalized) || generating} activeField={generating ? liveActive : null} onChange={update} /></Card>
-      <aside className="space-y-4"><Card className="border-slate-200 shadow-sm"><CardHeader><CardTitle className="text-base">定稿检查</CardTitle></CardHeader><CardContent className="space-y-3 text-sm"><div className="flex items-center gap-2 text-emerald-700"><CheckCircle2 size={16} />基本信息已继承</div><div className={`flex items-center gap-2 ${confirmedCount ? 'text-emerald-700' : 'text-amber-700'}`}><CheckCircle2 size={16} />{confirmedCount ? `已确认结论 ${confirmedCount} 条` : '尚无已确认结论'}{pendingCount ? ` · 待验证 ${pendingCount} 条` : ''}</div><div className={`flex items-start gap-2 ${missing.length ? 'text-amber-700' : 'text-emerald-700'}`}><ShieldCheck size={16} className="mt-0.5" />{missing.length ? `${missing.length} 项内容待补充：${missing.map((key) => key.toUpperCase()).join('、')}` : 'D1–D8 已完整'}</div><div className={`flex items-center gap-2 text-xs ${report.generation_engine === 'agent' ? 'text-slate-600' : 'text-amber-700'}`}>{report.generation_engine === 'agent' ? `生成模型：${String(report.model_name || '—')}` : report.generation_engine === 'rule' ? '规则模板生成，D5–D8 需工程师补写' : '人工填写，无生成记录'}</div>{Boolean(report.fallback_reason) && <div className="rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">降级说明：{String(report.fallback_reason)}</div>}<div className="rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">定稿会关闭预警、完成分析任务并写入历史归档。定稿前必须有至少一条已确认结论，且 D1–D8 完整。正式系统可在此接入审批流。</div></CardContent></Card>
-        <Button className="w-full bg-blue-700 hover:bg-blue-800" disabled={saving || finalized || generating} onClick={() => save(false)}>{saving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}保存草稿</Button>
-        <Button className="w-full bg-indigo-600 hover:bg-indigo-700" disabled={saving || finalized || generating || Boolean(blockers.length)} onClick={() => save(true)} title={blockers.join('；')}><ShieldCheck size={16} />确认定稿并归档</Button>
-        {Boolean(blockers.length) && !finalized && <p className="text-xs leading-5 text-amber-700">定稿前需先完成：{blockers.join('；')}。草稿可以随时保存。</p>}
+      <Card className="border-slate-200 shadow-sm"><CardHeader className="border-b border-slate-200"><div className="flex items-start justify-between gap-3"><div><CardTitle className="text-xl">{String(liveDraft.title || report.title)}</CardTitle><p className="mt-2 font-mono text-xs text-slate-500">{String(report.report_no)} · {String(report.event_no)}</p></div><Badge className="bg-indigo-50 text-indigo-700">{report.generation_engine === 'agent' ? 'Agent 生成草稿' : report.generation_engine === 'rule' ? '规则模板草稿' : '人工填写草稿'}</Badge></div><div className="mt-4 grid gap-3 rounded-xl bg-slate-50 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4"><div><span className="text-xs text-slate-500">产品规格</span><b className="block">{String(report.spec_name)}</b></div><div><span className="text-xs text-slate-500">生产批次</span><b className="block">{String(report.batch_no)}</b></div><div><span className="text-xs text-slate-500">异常指标</span><b className="block">{String(report.metric_code)}</b></div><div><span className="text-xs text-slate-500">风险级别</span><b className="block">{String(report.risk_level)}</b></div></div></CardHeader><DraftSections values={liveDraft} disabled={generating} activeField={generating ? liveActive : null} onChange={update} /></Card>
+      <aside className="space-y-4">
+        <Card className="border-slate-200 shadow-sm">
+          <CardHeader><CardTitle className="text-base">定稿检查</CardTitle></CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div className="flex items-center gap-2 text-emerald-700"><CheckCircle2 size={16} />基本信息已继承</div>
+            <div className={`flex items-center gap-2 ${confirmedCount ? 'text-emerald-700' : 'text-amber-700'}`}><CheckCircle2 size={16} />{confirmedCount ? `已确认结论 ${confirmedCount} 条` : '尚无已确认结论'}{pendingCount ? ` · 待验证 ${pendingCount} 条` : ''}</div>
+            <div className={`flex items-start gap-2 ${missing.length ? 'text-amber-700' : 'text-emerald-700'}`}><ShieldCheck size={16} className="mt-0.5" />{missing.length ? `${missing.length} 项内容待补充：${missing.map((key) => key.toUpperCase()).join('、')}` : 'D1–D8 已完整'}</div>
+            <div className={`flex items-center gap-2 text-xs ${report.generation_engine === 'agent' ? 'text-slate-600' : 'text-amber-700'}`}>{report.generation_engine === 'agent' ? `生成模型：${String(report.model_name || '—')}` : report.generation_engine === 'rule' ? '规则模板生成，D5–D8 需工程师补写' : '人工填写，无生成记录'}</div>
+            {Boolean(report.fallback_reason) && <div className="rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">降级说明：{String(report.fallback_reason)}</div>}
+            <div className="rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">{finalized
+              ? '本报告已归档，在历史分析中状态为「归档」。归档后仍可修改 D1–D8，点「保存修改」会同步更新这条历史记录，状态保持归档。'
+              : '定稿会把历史分析中这条记录的状态从「草稿」改为「归档」，同时关闭预警并完成分析任务。定稿前必须有至少一条已确认结论，且 D1–D8 完整。正式系统可在此接入审批流。'}</div>
+          </CardContent>
+        </Card>
+        {finalized
+          ? <Button className="w-full bg-blue-700 hover:bg-blue-800" disabled={saving || generating} onClick={() => save(false)}>{saving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}保存修改</Button>
+          : <>
+            <Button className="w-full bg-blue-700 hover:bg-blue-800" disabled={saving || generating} onClick={() => save(false)}>{saving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}保存草稿</Button>
+            <Button className="w-full bg-indigo-600 hover:bg-indigo-700" disabled={saving || generating || Boolean(blockers.length)} onClick={() => save(true)} title={blockers.join('；')}><ShieldCheck size={16} />确认定稿并归档</Button>
+            {Boolean(blockers.length) && <p className="text-xs leading-5 text-amber-700">定稿前需先完成：{blockers.join('；')}。草稿可以随时保存。</p>}
+          </>}
         <Button className="w-full" variant="outline" onClick={exportHtml}><Download size={16} />导出 HTML</Button>
         <Button className="w-full" variant="outline" onClick={() => window.print()}><Printer size={16} />打印 / PDF</Button>
+        <Button className="w-full" variant="outline" asChild><Link href="/quality/history"><Archive size={16} />历史分析</Link></Button>
         <Button className="w-full" variant="ghost" asChild><Link href={`/quality/diagnosis?alertId=${report.alert_id}`}>返回诊断</Link></Button>
       </aside>
     </div>
